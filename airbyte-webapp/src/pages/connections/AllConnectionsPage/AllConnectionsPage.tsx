@@ -1,9 +1,8 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useLayoutEffect, useMemo } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { useNavigate } from "react-router-dom";
 
 import { LoadingPage } from "components";
-import { ConnectionOnboarding } from "components/connection/ConnectionOnboarding";
 import { HeadTitle } from "components/HeadTitle";
 import { Button } from "components/ui/Button";
 import { FlexContainer, FlexItem } from "components/ui/Flex";
@@ -14,15 +13,23 @@ import { ScrollParent } from "components/ui/ScrollParent";
 
 import { ActiveConnectionLimitReachedModal } from "area/workspace/components/ActiveConnectionLimitReachedModal";
 import { useCurrentWorkspaceLimits } from "area/workspace/utils/useCurrentWorkspaceLimits";
-import { useCurrentWorkspace, useCurrentWorkspaceState } from "core/api";
+import { useConnectionList, useCurrentWorkspace, useListConnectionsStatusesAsync, useFilters } from "core/api";
+import { WebBackendConnectionListSortKey } from "core/api/types/AirbyteClient";
 import { PageTrackingCodes, useTrackPage } from "core/services/analytics";
-import { useIntent } from "core/utils/rbac";
+import { useDrawerActions } from "core/services/ui/DrawerService";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
+import { useExperiment } from "hooks/services/Experiment";
 import { useModalService } from "hooks/services/Modal";
+import { RoutePaths, ConnectionRoutePaths } from "pages/routePaths";
 
 import styles from "./AllConnectionsPage.module.scss";
+import { FilterValues } from "./ConnectionsFilters/ConnectionsFilters";
 import { ConnectionsListCard } from "./ConnectionsListCard";
 import { ConnectionsSummary } from "./ConnectionsSummary";
-import { ConnectionRoutePaths } from "../../routePaths";
+
+const ConnectionOnboarding = React.lazy(() =>
+  import("components/connection/ConnectionOnboarding").then((module) => ({ default: module.ConnectionOnboarding }))
+);
 
 export const AllConnectionsPage: React.FC = () => {
   useTrackPage(PageTrackingCodes.CONNECTIONS_LIST);
@@ -30,11 +37,55 @@ export const AllConnectionsPage: React.FC = () => {
   const { activeConnectionLimitReached, limits } = useCurrentWorkspaceLimits();
   const { formatMessage } = useIntl();
   const { openModal } = useModalService();
+  const { closeDrawer } = useDrawerActions();
+
+  // Filter state management
+  const [filterValues, setFilterValue, resetFilters] = useFilters<FilterValues>({
+    search: "",
+    state: null,
+    status: null,
+    source: null,
+    destination: null,
+  });
+
+  // Tag filter state management
+  const [tagFilters, setTagFilters] = React.useState<string[]>([]);
+
+  // Sort state management
+  const [sortKey, setSortKey] = React.useState<WebBackendConnectionListSortKey>("connectionName_asc");
 
   const { workspaceId } = useCurrentWorkspace();
-  const canCreateConnection = useIntent("CreateConnection", { workspaceId });
+  const canCreateConnection = useGeneratedIntent(Intent.CreateOrEditConnection);
 
-  const { hasConnections } = useCurrentWorkspaceState();
+  // Pass filters and sort state to useConnectionList for server-side filtering and sorting
+  const connectionListQuery = useConnectionList({
+    filters: {
+      search: filterValues.search,
+      status: filterValues.status,
+      state: filterValues.state,
+      sourceDefinitionIds: filterValues.source ? [filterValues.source] : [],
+      destinationDefinitionIds: filterValues.destination ? [filterValues.destination] : [],
+      tagIds: tagFilters.length > 0 ? tagFilters : [],
+    },
+    sortKey,
+  });
+
+  const connections = useMemo(
+    () => connectionListQuery.data?.pages.flatMap((page) => page.connections) ?? [],
+    [connectionListQuery.data?.pages]
+  );
+  const isAllConnectionsStatusEnabled = useExperiment("connections.connectionsStatusesEnabled");
+
+  const onCreateConnection = () => {
+    navigate(
+      `/${RoutePaths.Workspaces}/${workspaceId}/${RoutePaths.Connections}/${ConnectionRoutePaths.ConnectionNew}`
+    );
+  };
+
+  useListConnectionsStatusesAsync(
+    connections.map((connection) => connection.connectionId),
+    isAllConnectionsStatusEnabled
+  );
 
   const onCreateClick = (sourceDefinitionId?: string) => {
     if (activeConnectionLimitReached && limits) {
@@ -47,11 +98,26 @@ export const AllConnectionsPage: React.FC = () => {
     }
   };
 
+  useLayoutEffect(() => {
+    return () => closeDrawer();
+  }, [closeDrawer]);
+
+  // This query is only used to determine if the workspace's total connection count is > 0
+  const connectionCountQuery = useConnectionList({
+    pageSize: 1,
+  });
+  const hasAnyConnections =
+    connectionCountQuery.data?.pages.length && connectionCountQuery.data.pages[0].connections.length > 0;
+
+  if (connectionCountQuery.isLoading) {
+    return <LoadingPage />;
+  }
+
   return (
     <Suspense fallback={<LoadingPage />}>
       <>
         <HeadTitle titles={[{ id: "sidebar.connections" }]} />
-        {hasConnections ? (
+        {hasAnyConnections ? (
           <PageGridContainer>
             <PageHeader
               className={styles.pageHeader}
@@ -63,9 +129,7 @@ export const AllConnectionsPage: React.FC = () => {
                     </Heading>
                   </FlexItem>
                   <FlexItem>
-                    <Suspense fallback={null}>
-                      <ConnectionsSummary />
-                    </Suspense>
+                    <ConnectionsSummary />
                   </FlexItem>
                 </FlexContainer>
               }
@@ -85,11 +149,26 @@ export const AllConnectionsPage: React.FC = () => {
               }
             />
             <ScrollParent props={{ className: styles.pageBody }}>
-              <ConnectionsListCard />
+              <ConnectionsListCard
+                isLoading={connectionListQuery.isLoading}
+                connections={connections}
+                fetchNextPage={() => !connectionListQuery.isFetchingNextPage && connectionListQuery.fetchNextPage()}
+                hasNextPage={connectionListQuery.hasNextPage ?? false}
+                filterValues={filterValues}
+                setFilterValue={setFilterValue}
+                resetFilters={() => {
+                  resetFilters();
+                  setTagFilters([]);
+                }}
+                tagFilters={tagFilters}
+                setTagFilters={setTagFilters}
+                sortKey={sortKey}
+                setSortKey={setSortKey}
+              />
             </ScrollParent>
           </PageGridContainer>
         ) : (
-          <ConnectionOnboarding onCreate={onCreateClick} />
+          <ConnectionOnboarding onCreate={onCreateConnection} />
         )}
       </>
     </Suspense>

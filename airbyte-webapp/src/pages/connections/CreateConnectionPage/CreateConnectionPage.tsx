@@ -9,7 +9,7 @@ import { HeadTitle } from "components/HeadTitle";
 import { PageHeaderWithNavigation } from "components/ui/PageHeader";
 
 import { useCurrentWorkspaceId } from "area/workspace/utils";
-import { useGetDestination, useGetSource } from "core/api";
+import { useDestinationDefinitionList, useGetDestination, useGetSource } from "core/api";
 import { PageTrackingCodes, useTrackPage } from "core/services/analytics";
 import { AppActionCodes, trackAction } from "core/utils/datadog";
 import { ConnectionRoutePaths, RoutePaths } from "pages/routePaths";
@@ -50,6 +50,8 @@ const CurrentStep: React.FC = () => {
   const destinationId = searchParams.get("destinationId");
   const source = useGetSource(sourceId);
   const destination = useGetDestination(destinationId);
+  const { destinationDefinitionMap } = useDestinationDefinitionList();
+  const destinationDefinition = destinationDefinitionMap.get(destination?.destinationDefinitionId || "");
 
   const sourceRef: MutableRefObject<string | null> = useRef(sourceId);
   useEffect(() => {
@@ -79,6 +81,17 @@ const CurrentStep: React.FC = () => {
   }
   // both source and destination are configured, configure the connection now
   if (source && destination) {
+    // Data Activation connections are handled in a different route
+    if (destinationDefinition?.supportsDataActivation) {
+      return (
+        <Navigate
+          to={{
+            pathname: `/${RoutePaths.Workspaces}/${workspaceId}/${RoutePaths.Connections}/${ConnectionRoutePaths.ConnectionNew}/${ConnectionRoutePaths.ConfigureDataActivation}`,
+            search: `?${searchParams.toString()}`,
+          }}
+        />
+      );
+    }
     return (
       <Navigate
         to={{

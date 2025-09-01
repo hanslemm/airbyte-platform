@@ -5,6 +5,7 @@
 package io.airbyte.server.config
 
 import io.airbyte.analytics.TrackingClient
+import io.airbyte.api.client.WebUrlHelper
 import io.airbyte.commons.envvar.EnvVar
 import io.airbyte.commons.server.handlers.helpers.BuilderProjectUpdater
 import io.airbyte.commons.server.handlers.helpers.CompositeBuilderProjectUpdater
@@ -13,6 +14,9 @@ import io.airbyte.commons.server.handlers.helpers.LocalFileSystemBuilderProjectU
 import io.airbyte.commons.server.limits.ProductLimitsProvider
 import io.airbyte.commons.server.scheduler.EventRunner
 import io.airbyte.commons.server.scheduler.TemporalEventRunner
+import io.airbyte.commons.storage.DocumentType
+import io.airbyte.commons.storage.StorageClient
+import io.airbyte.commons.storage.StorageClientFactory
 import io.airbyte.commons.temporal.TemporalClient
 import io.airbyte.commons.workers.config.WorkerConfigsProvider
 import io.airbyte.config.Configs
@@ -26,19 +30,31 @@ import io.airbyte.data.services.DestinationService
 import io.airbyte.data.services.OperationService
 import io.airbyte.data.services.SourceService
 import io.airbyte.data.services.WorkspaceService
+import io.airbyte.featureflag.DestinationTimeoutEnabled
+import io.airbyte.featureflag.DestinationTimeoutSeconds
+import io.airbyte.featureflag.FailSyncOnInvalidChecksum
 import io.airbyte.featureflag.FeatureFlagClient
+import io.airbyte.featureflag.Flag
+import io.airbyte.featureflag.LogConnectorMessages
+import io.airbyte.featureflag.LogStateMsgs
+import io.airbyte.featureflag.PrintLongRecordPks
+import io.airbyte.featureflag.RemoveValidationLimit
+import io.airbyte.featureflag.ReplicationBufferOverride
+import io.airbyte.featureflag.ShouldFailSyncIfHeartbeatFailure
+import io.airbyte.featureflag.ShouldFailSyncOnDestinationTimeout
+import io.airbyte.featureflag.WorkloadHeartbeatRate
+import io.airbyte.featureflag.WorkloadHeartbeatTimeout
 import io.airbyte.metrics.MetricClient
 import io.airbyte.oauth.OAuthImplementationFactory
 import io.airbyte.persistence.job.DefaultJobCreator
 import io.airbyte.persistence.job.JobNotifier
 import io.airbyte.persistence.job.JobPersistence
-import io.airbyte.persistence.job.WebUrlHelper
 import io.airbyte.persistence.job.WorkspaceHelper
 import io.airbyte.persistence.job.factory.DefaultSyncJobFactory
 import io.airbyte.persistence.job.factory.OAuthConfigSupplier
 import io.airbyte.persistence.job.factory.SyncJobFactory
 import io.airbyte.persistence.job.tracker.JobTracker
-import io.airbyte.validation.json.JsonSchemaValidator
+import io.airbyte.workers.models.ReplicationFeatureFlags
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
 import io.micronaut.context.annotation.Factory
@@ -61,18 +77,18 @@ class ApplicationBeanFactory {
   fun randomUUIDSupplier(): Supplier<UUID> = Supplier { UUID.randomUUID() }
 
   @Singleton
-  fun eventRunner(temporalClient: TemporalClient?): EventRunner = TemporalEventRunner(temporalClient)
+  fun eventRunner(temporalClient: TemporalClient): EventRunner = TemporalEventRunner(temporalClient)
 
   @Singleton
   fun jobTracker(
-    jobPersistence: JobPersistence?,
-    trackingClient: TrackingClient?,
-    actorDefinitionVersionHelper: ActorDefinitionVersionHelper?,
-    sourceService: SourceService?,
-    destinationService: DestinationService?,
-    connectionService: ConnectionService?,
-    operationService: OperationService?,
-    workspaceService: WorkspaceService?,
+    jobPersistence: JobPersistence,
+    trackingClient: TrackingClient,
+    actorDefinitionVersionHelper: ActorDefinitionVersionHelper,
+    sourceService: SourceService,
+    destinationService: DestinationService,
+    connectionService: ConnectionService,
+    operationService: OperationService,
+    workspaceService: WorkspaceService,
   ): JobTracker =
     JobTracker(
       jobPersistence,
@@ -87,15 +103,15 @@ class ApplicationBeanFactory {
 
   @Singleton
   fun jobNotifier(
-    trackingClient: TrackingClient?,
-    webUrlHelper: WebUrlHelper?,
-    workspaceHelper: WorkspaceHelper?,
-    actorDefinitionVersionHelper: ActorDefinitionVersionHelper?,
-    sourceService: SourceService?,
-    destinationService: DestinationService?,
-    connectionService: ConnectionService?,
-    workspaceService: WorkspaceService?,
-    metricClient: MetricClient?,
+    trackingClient: TrackingClient,
+    webUrlHelper: WebUrlHelper,
+    workspaceHelper: WorkspaceHelper,
+    actorDefinitionVersionHelper: ActorDefinitionVersionHelper,
+    sourceService: SourceService,
+    destinationService: DestinationService,
+    connectionService: ConnectionService,
+    workspaceService: WorkspaceService,
+    metricClient: MetricClient,
   ): JobNotifier =
     JobNotifier(
       webUrlHelper,
@@ -111,29 +127,29 @@ class ApplicationBeanFactory {
 
   @Singleton
   fun defaultJobCreator(
-    jobPersistence: JobPersistence?,
-    workerConfigsProvider: WorkerConfigsProvider?,
-    featureFlagClient: FeatureFlagClient?,
-    streamRefreshesRepository: StreamRefreshesRepository?,
+    jobPersistence: JobPersistence,
+    workerConfigsProvider: WorkerConfigsProvider,
+    featureFlagClient: FeatureFlagClient,
+    streamRefreshesRepository: StreamRefreshesRepository,
     @Value("\${airbyte.worker.kube-job-config-variant-override}") variantOverride: String?,
   ): DefaultJobCreator = DefaultJobCreator(jobPersistence, workerConfigsProvider, featureFlagClient, streamRefreshesRepository, variantOverride)
 
   @Singleton
   fun jobFactory(
-    jobPersistence: JobPersistence?,
+    jobPersistence: JobPersistence,
     @Property(
       name = "airbyte.connector.specific-resource-defaults-enabled",
       defaultValue = "false",
     ) connectorSpecificResourceDefaultsEnabled: Boolean,
-    jobCreator: DefaultJobCreator?,
-    oAuthConfigSupplier: OAuthConfigSupplier?,
-    configInjector: ConfigInjector?,
-    actorDefinitionVersionHelper: ActorDefinitionVersionHelper?,
-    sourceService: SourceService?,
-    destinationService: DestinationService?,
-    connectionService: ConnectionService?,
-    operationService: OperationService?,
-    workspaceService: WorkspaceService?,
+    jobCreator: DefaultJobCreator,
+    oAuthConfigSupplier: OAuthConfigSupplier,
+    configInjector: ConfigInjector,
+    actorDefinitionVersionHelper: ActorDefinitionVersionHelper,
+    sourceService: SourceService,
+    destinationService: DestinationService,
+    connectionService: ConnectionService,
+    operationService: OperationService,
+    workspaceService: WorkspaceService,
   ): SyncJobFactory =
     DefaultSyncJobFactory(
       connectorSpecificResourceDefaultsEnabled,
@@ -148,11 +164,6 @@ class ApplicationBeanFactory {
       operationService,
       workspaceService,
     )
-
-  @Singleton
-  fun webUrlHelper(
-    @Value("\${airbyte.web-app.url}") webAppUrl: String?,
-  ): WebUrlHelper = WebUrlHelper(webAppUrl)
 
   @Singleton
   @Named("workspaceRoot")
@@ -187,9 +198,6 @@ class ApplicationBeanFactory {
   fun jsonSecretsProcessorWithCopy(): JsonSecretsProcessor = JsonSecretsProcessor(true)
 
   @Singleton
-  fun jsonSchemaValidator(): JsonSchemaValidator = JsonSchemaValidator()
-
-  @Singleton
   @Named("oauthHttpClient")
   fun httpClient(): HttpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()
 
@@ -199,7 +207,7 @@ class ApplicationBeanFactory {
     OAuthImplementationFactory(HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build())
 
   @Singleton
-  fun builderProjectUpdater(connectorBuilderService: ConnectorBuilderService?): BuilderProjectUpdater {
+  fun builderProjectUpdater(connectorBuilderService: ConnectorBuilderService): BuilderProjectUpdater {
     val pathToConnectors = EnvVar.PATH_TO_CONNECTORS.fetch()
     val configRepositoryProjectUpdater = ConfigRepositoryBuilderProjectUpdater(connectorBuilderService)
     return if (pathToConnectors == null || pathToConnectors.isEmpty()) {
@@ -229,4 +237,34 @@ class ApplicationBeanFactory {
     @Value("\${airbyte.server.limits.workspaces}") maxWorkspaces: Long,
     @Value("\${airbyte.server.limits.users}") maxUsers: Long,
   ): ProductLimitsProvider.OrganizationLimits = ProductLimitsProvider.OrganizationLimits(maxWorkspaces, maxUsers)
+
+  /**
+   * This bean is duplicated from the bean in the config of the airbyte workers module.
+   * This duplication has been made to avoid moving this bean to the common module.
+   * In the future we should only need this bean.
+   */
+  @Singleton
+  @Named("replicationFeatureFlags")
+  fun replicationFeatureFlags(): ReplicationFeatureFlags {
+    val featureFlags =
+      listOf<Flag<*>>(
+        DestinationTimeoutEnabled,
+        DestinationTimeoutSeconds,
+        FailSyncOnInvalidChecksum,
+        LogConnectorMessages,
+        LogStateMsgs,
+        PrintLongRecordPks,
+        RemoveValidationLimit,
+        ReplicationBufferOverride,
+        ShouldFailSyncIfHeartbeatFailure,
+        ShouldFailSyncOnDestinationTimeout,
+        WorkloadHeartbeatRate,
+        WorkloadHeartbeatTimeout,
+      )
+    return ReplicationFeatureFlags(featureFlags)
+  }
+
+  @Singleton
+  @Named("outputDocumentStore")
+  fun workloadStorageClient(factory: StorageClientFactory): StorageClient = factory.create(DocumentType.WORKLOAD_OUTPUT)
 }

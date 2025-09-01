@@ -16,7 +16,6 @@ import io.airbyte.publicApi.server.generated.models.ConnectionResponse
 import io.airbyte.publicApi.server.generated.models.ConnectionScheduleResponse
 import io.airbyte.publicApi.server.generated.models.ConnectionStatusEnum
 import io.airbyte.publicApi.server.generated.models.ConnectionSyncModeEnum
-import io.airbyte.publicApi.server.generated.models.GeographyEnum
 import io.airbyte.publicApi.server.generated.models.NamespaceDefinitionEnum
 import io.airbyte.publicApi.server.generated.models.NonBreakingSchemaUpdatesBehaviorEnum
 import io.airbyte.publicApi.server.generated.models.ScheduleTypeWithBasicEnum
@@ -58,9 +57,11 @@ object ConnectionReadMapper {
                   }
                 StreamConfiguration(
                   name = streamAndConfiguration.stream.name,
+                  namespace = streamAndConfiguration.stream.namespace,
                   primaryKey = streamAndConfiguration.config.primaryKey,
                   cursorField = streamAndConfiguration.config.cursorField,
                   mappers = convertMappers(streamAndConfiguration.config.mappers),
+                  includeFiles = streamAndConfiguration.config.includeFiles,
                   syncMode = connectionSyncMode,
                   selectedFields = selectedFields,
                 )
@@ -90,7 +91,6 @@ object ConnectionReadMapper {
       workspaceId = workspaceId.toString(),
       status = ConnectionStatusEnum.valueOf(connectionRead.status.toString().uppercase()),
       schedule = connectionScheduleResponse,
-      dataResidency = connectionRead.geography?.let { g -> GeographyEnum.valueOf(g.toString().uppercase()) } ?: GeographyEnum.AUTO,
       configurations = streamConfigurations,
       nonBreakingSchemaUpdatesBehavior = connectionRead.nonBreakingChangesPreference?.let { n -> convertNonBreakingChangesPreference(n) },
       namespaceDefinition = connectionRead.namespaceDefinition?.let { n -> convertNamespaceDefinitionType(n) },
@@ -184,6 +184,14 @@ object ConnectionReadMapper {
               DestinationSyncMode.OVERWRITE_DEDUP,
               ConnectionSyncModeEnum.FULL_REFRESH_OVERWRITE_DEDUPED,
             ),
+            Pair(
+              DestinationSyncMode.UPDATE,
+              ConnectionSyncModeEnum.FULL_REFRESH_UPDATE,
+            ),
+            Pair(
+              DestinationSyncMode.SOFT_DELETE,
+              ConnectionSyncModeEnum.FULL_REFRESH_SOFT_DELETE,
+            ),
           ),
         SyncMode.INCREMENTAL to
           mapOf(
@@ -194,6 +202,14 @@ object ConnectionReadMapper {
             Pair(
               DestinationSyncMode.APPEND_DEDUP,
               ConnectionSyncModeEnum.INCREMENTAL_DEDUPED_HISTORY,
+            ),
+            Pair(
+              DestinationSyncMode.UPDATE,
+              ConnectionSyncModeEnum.INCREMENTAL_UPDATE,
+            ),
+            Pair(
+              DestinationSyncMode.SOFT_DELETE,
+              ConnectionSyncModeEnum.INCREMENTAL_SOFT_DELETE,
             ),
           ),
       )

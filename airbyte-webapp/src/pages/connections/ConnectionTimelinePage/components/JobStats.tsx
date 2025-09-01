@@ -1,4 +1,5 @@
 import { FormattedMessage } from "react-intl";
+import { z } from "zod";
 
 import { FlexContainer } from "components/ui/Flex";
 import { Text } from "components/ui/Text";
@@ -7,23 +8,24 @@ import { formatBytes } from "core/utils/numberHelper";
 import { useFormatDuration } from "core/utils/time";
 import { useLocalStorage } from "core/utils/useLocalStorage";
 
+import { RejectedRecordsLink } from "./RejectedRecordsLink";
+import { jobSummarySchema } from "../types";
+
 interface JobStatsProps {
-  attemptsCount?: number;
-  bytesLoaded?: number;
-  endTimeEpochSeconds: number;
-  jobId: number;
-  recordsLoaded?: number;
-  startTimeEpochSeconds: number;
+  summary: z.infer<typeof jobSummarySchema>;
 }
 
-export const JobStats: React.FC<JobStatsProps> = ({
-  attemptsCount,
-  bytesLoaded,
-  endTimeEpochSeconds,
-  jobId,
-  recordsLoaded,
-  startTimeEpochSeconds,
-}) => {
+export const JobStats: React.FC<JobStatsProps> = ({ summary }) => {
+  const {
+    attemptsCount,
+    bytesLoaded,
+    endTimeEpochSeconds,
+    jobId,
+    recordsLoaded,
+    startTimeEpochSeconds,
+    recordsRejected,
+    rejectedRecordsMeta,
+  } = summary;
   const [showExtendedStats] = useLocalStorage("airbyte_extended-attempts-stats", false);
   const duration = useFormatDuration(startTimeEpochSeconds * 1000, endTimeEpochSeconds * 1000);
 
@@ -42,6 +44,15 @@ export const JobStats: React.FC<JobStatsProps> = ({
           <Text as="span" color="grey400" size="sm">
             <FormattedMessage id="sources.countRecordsLoaded" values={{ count: recordsLoaded }} />
           </Text>
+          <StatSeparator />
+        </>
+      )}
+      {!!recordsRejected && (
+        <>
+          <RejectedRecordsLink
+            recordsRejected={recordsRejected}
+            cloudConsoleUrl={rejectedRecordsMeta?.cloudConsoleUrl}
+          />
           <StatSeparator />
         </>
       )}

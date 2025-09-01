@@ -6,10 +6,21 @@
 */}}
 
 {{/*
+Renders the common secret name
+*/}}
+{{- define "airbyte.common.secretName" }}
+{{- if .Values.global.secretName }}
+    {{- .Values.global.secretName }}
+{{- else }}
+    {{- .Values.global.secretName | default (printf "%s-airbyte-secrets" .Release.Name) }}
+{{- end }}
+{{- end }}
+
+{{/*
 Renders the global.edition value
 */}}
 {{- define "airbyte.common.edition" }}
-    {{- ternary "pro" .Values.global.edition (or (eq .Values.global.edition "pro") (eq .Values.global.edition "enterprise")) }}
+    {{- .Values.global.edition | default "community" }}
 {{- end }}
 
 {{/*
@@ -99,7 +110,7 @@ Renders the common.airbyteUrl environment variable
 Renders the global.api.host value
 */}}
 {{- define "airbyte.common.api.host" }}
-    {{- ternary (printf "http://localhost:%d/api/public" (int .Values.server.service.port)) (printf "%s/api/public" .Values.global.airbyteUrl) (eq .Values.global.edition "community") }}
+    {{- .Values.global.api.host | default (ternary (printf "http://localhost:%d/api/public" (int .Values.server.service.port)) (printf "%s/api/public" .Values.global.airbyteUrl) (eq .Values.global.edition "community")) }}
 {{- end }}
 
 {{/*
@@ -111,24 +122,6 @@ Renders the common.api.host environment variable
     configMapKeyRef:
       name: {{ .Release.Name }}-airbyte-env
       key: AIRBYTE_API_HOST
-{{- end }}
-
-{{/*
-Renders the global.api.authHeaderName value
-*/}}
-{{- define "airbyte.common.api.authHeaderName" }}
-    {{- .Values.global.api.authHeaderName | default "X-Airbyte-Auth" }}
-{{- end }}
-
-{{/*
-Renders the common.api.authHeaderName environment variable
-*/}}
-{{- define "airbyte.common.api.authHeaderName.env" }}
-- name: AIRBYTE_API_AUTH_HEADER_NAME
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: AIRBYTE_API_AUTH_HEADER_NAME
 {{- end }}
 
 {{/*
@@ -150,16 +143,20 @@ Renders the common.server.host environment variable
 {{- end }}
 
 {{/*
-Renders the global.api.authEnabled value
+Renders the global.auth.enabled value
 */}}
-{{- define "airbyte.common.api.authEnabled" }}
-    {{- .Values.global.api.authEnabled | default true }}
+{{- define "airbyte.common.auth.enabled" }}
+	{{- if eq .Values.global.auth.enabled nil }}
+    	{{- true }}
+	{{- else }}
+    	{{- .Values.global.auth.enabled }}
+	{{- end }}
 {{- end }}
 
 {{/*
-Renders the common.api.authEnabled environment variable
+Renders the common.auth.enabled environment variable
 */}}
-{{- define "airbyte.common.api.authEnabled.env" }}
+{{- define "airbyte.common.auth.enabled.env" }}
 - name: API_AUTHORIZATION_ENABLED
   valueFrom:
     configMapKeyRef:
@@ -186,10 +183,46 @@ Renders the common.connectorBuilderServer.apiHost environment variable
 {{- end }}
 
 {{/*
+Renders the global.manifestServer.apiHost value
+*/}}
+{{- define "airbyte.common.manifestServer.apiHost" }}
+    {{- (printf "http://%s-airbyte-manifest-server-svc.%s:%d" .Release.Name .Release.Namespace (int .Values.manifestServer.service.port)) }}
+{{- end }}
+
+{{/*
+Renders the common.manifestServer.apiHost environment variable
+*/}}
+{{- define "airbyte.common.manifestServer.apiHost.env" }}
+- name: MANIFEST_SERVER_API_HOST
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: MANIFEST_SERVER_API_HOST
+{{- end }}
+
+{{/*
+Renders the global.deploymentEnv value
+*/}}
+{{- define "airbyte.common.deploymentEnv" }}
+    {{- .Values.global.deploymentEnv }}
+{{- end }}
+
+{{/*
+Renders the common.deploymentEnv environment variable
+*/}}
+{{- define "airbyte.common.deploymentEnv.env" }}
+- name: DEPLOYMENT_ENV
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: DEPLOYMENT_ENV
+{{- end }}
+
+{{/*
 Renders the global.api.internalHost value
 */}}
 {{- define "airbyte.common.api.internalHost" }}
-    {{- (printf "http://%s-airbyte-server-svc.%s:%d" .Release.Name .Release.Namespace (int .Values.server.service.port)) }}
+    {{- ternary (include "airbyte.common.airbyteUrl" .) (printf "http://%s-airbyte-server-svc.%s:%d" .Release.Name .Release.Namespace (int .Values.server.service.port)) (eq (include "airbyte.common.cluster.type" .) "data-plane") }}
 {{- end }}
 
 {{/*
@@ -207,7 +240,11 @@ Renders the common.api.internalHost environment variable
 Renders the global.local value
 */}}
 {{- define "airbyte.common.local" }}
-    {{- .Values.global.local | default false }}
+	{{- if eq .Values.global.local nil }}
+    	{{- false }}
+	{{- else }}
+    	{{- .Values.global.local }}
+	{{- end }}
 {{- end }}
 
 {{/*
@@ -225,7 +262,7 @@ Renders the common.local environment variable
 Renders the global.webapp.url value
 */}}
 {{- define "airbyte.common.webapp.url" }}
-    {{- (printf "http://%s-airbyte-webapp-svc.%s:%d" .Release.Name .Release.Namespace (int .Values.webapp.service.port)) }}
+    {{- (include "airbyte.common.airbyteUrl" .) }}
 {{- end }}
 
 {{/*
@@ -240,6 +277,31 @@ Renders the common.webapp.url environment variable
 {{- end }}
 
 {{/*
+Renders the global.dummySecret value
+*/}}
+{{- define "airbyte.common.dummySecret" }}
+    {{- .Values.global.dummySecret | default "dummy" }}
+{{- end }}
+
+{{/*
+Renders the common.dummySecret secret key
+*/}}
+{{- define "airbyte.common.dummySecret.secretKey" }}
+	{{- .Values.global.dummySecretSecretKey | default "AIRBYTE_DUMMY_SECRET" }}
+{{- end }}
+
+{{/*
+Renders the common.dummySecret environment variable
+*/}}
+{{- define "airbyte.common.dummySecret.env" }}
+- name: AIRBYTE_DUMMY_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "airbyte.common.secretName" . }}
+      key: {{ include "airbyte.common.dummySecret.secretKey" . }}
+{{- end }}
+
+{{/*
 Renders the set of all common environment variables
 */}}
 {{- define "airbyte.common.envs" }}
@@ -249,13 +311,15 @@ Renders the set of all common environment variables
 {{- include "airbyte.common.cluster.name.env" . }}
 {{- include "airbyte.common.airbyteUrl.env" . }}
 {{- include "airbyte.common.api.host.env" . }}
-{{- include "airbyte.common.api.authHeaderName.env" . }}
 {{- include "airbyte.common.server.host.env" . }}
-{{- include "airbyte.common.api.authEnabled.env" . }}
+{{- include "airbyte.common.auth.enabled.env" . }}
 {{- include "airbyte.common.connectorBuilderServer.apiHost.env" . }}
+{{- include "airbyte.common.manifestServer.apiHost.env" . }}
+{{- include "airbyte.common.deploymentEnv.env" . }}
 {{- include "airbyte.common.api.internalHost.env" . }}
 {{- include "airbyte.common.local.env" . }}
 {{- include "airbyte.common.webapp.url.env" . }}
+{{- include "airbyte.common.dummySecret.env" . }}
 {{- end }}
 
 {{/*
@@ -268,11 +332,19 @@ AIRBYTE_CLUSTER_TYPE: {{ include "airbyte.common.cluster.type" . | quote }}
 AIRBYTE_CLUSTER_NAME: {{ include "airbyte.common.cluster.name" . | quote }}
 AIRBYTE_URL: {{ include "airbyte.common.airbyteUrl" . | quote }}
 AIRBYTE_API_HOST: {{ include "airbyte.common.api.host" . | quote }}
-AIRBYTE_API_AUTH_HEADER_NAME: {{ include "airbyte.common.api.authHeaderName" . | quote }}
 AIRBYTE_SERVER_HOST: {{ include "airbyte.common.server.host" . | quote }}
-API_AUTHORIZATION_ENABLED: {{ include "airbyte.common.api.authEnabled" . | quote }}
+API_AUTHORIZATION_ENABLED: {{ include "airbyte.common.auth.enabled" . | quote }}
 CONNECTOR_BUILDER_SERVER_API_HOST: {{ include "airbyte.common.connectorBuilderServer.apiHost" . | quote }}
+MANIFEST_SERVER_API_HOST: {{ include "airbyte.common.manifestServer.apiHost" . | quote }}
+DEPLOYMENT_ENV: {{ include "airbyte.common.deploymentEnv" . | quote }}
 INTERNAL_API_HOST: {{ include "airbyte.common.api.internalHost" . | quote }}
 LOCAL: {{ include "airbyte.common.local" . | quote }}
 WEBAPP_URL: {{ include "airbyte.common.webapp.url" . | quote }}
+{{- end }}
+
+{{/*
+Renders the set of all common secret variables
+*/}}
+{{- define "airbyte.common.secrets" }}
+AIRBYTE_DUMMY_SECRET: {{ include "airbyte.common.dummySecret" . | quote }}
 {{- end }}

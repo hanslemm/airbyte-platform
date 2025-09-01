@@ -14,6 +14,7 @@
 
   input {
     font-size: variables.$font-size-md;
+    width: fit-content;
 
     ::placeholder {
       font-size: variables.$font-size-md;
@@ -42,17 +43,6 @@
   padding: 7px 8px;
   line-height: 1.2;
   white-space: nowrap;
-}
-
-.form {
-  display: flex;
-  gap: variables.$spacing-md;
-  align-items: center;
-  flex-wrap: wrap;
-
-  p {
-    white-space: nowrap;
-  }
 }
 
 // will change library component behavior in https://github.com/airbytehq/airbyte-internal-issues/issues/11277

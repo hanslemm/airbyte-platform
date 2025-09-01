@@ -9,6 +9,7 @@ import { Button } from "components/ui/Button";
 import { DropdownMenu, DropdownMenuOptionType } from "components/ui/DropdownMenu";
 import { Text } from "components/ui/Text";
 
+import { useIsDataActivationConnection } from "area/connection/utils/useIsDataActivationConnection";
 import { useCurrentConnection, useDestinationDefinitionVersion } from "core/api";
 import {
   AirbyteStreamAndConfiguration,
@@ -36,7 +37,7 @@ export const StreamActionsMenu: React.FC<StreamActionsMenuProps> = ({ streamName
   const navigate = useNavigate();
   const connection = useCurrentConnection();
   const { isSyncConnectionAvailable, clearStreams: resetStreams, refreshStreams } = useConnectionSyncContext();
-
+  const isDataActivationConnection = useIsDataActivationConnection();
   const { supportsRefreshes: destinationSupportsRefreshes } = useDestinationDefinitionVersion(
     connection.destination.destinationId
   );
@@ -56,7 +57,7 @@ export const StreamActionsMenu: React.FC<StreamActionsMenuProps> = ({ streamName
     };
   }, [catalogStream?.config?.destinationSyncMode, catalogStream?.config?.syncMode, destinationSupportsRefreshes]);
 
-  const showRefreshOption = canMerge || canTruncate;
+  const hasIncremental = canMerge || canTruncate;
 
   if (!catalogStream) {
     return null;
@@ -67,15 +68,21 @@ export const StreamActionsMenu: React.FC<StreamActionsMenuProps> = ({ streamName
       displayName: formatMessage({ id: "connection.stream.actions.edit" }),
       value: "editStream",
     },
-    ...(showRefreshOption
-      ? [
+
+    ...(isDataActivationConnection
+      ? []
+      : [
           {
             displayName: formatMessage({ id: "connection.stream.actions.refreshStream" }),
             value: "refreshStream",
-            disabled: disableSyncActions,
+            disabled: disableSyncActions || !destinationSupportsRefreshes || !hasIncremental,
+            tooltipContent: !destinationSupportsRefreshes
+              ? formatMessage({ id: "connection.stream.actions.refreshDisabled.destinationNotSupported" })
+              : !hasIncremental
+              ? formatMessage({ id: "connection.stream.actions.refreshDisabled.streamNotIncremental" })
+              : undefined,
           },
-        ]
-      : []),
+        ]),
     {
       displayName: formatMessage({
         id: "connection.stream.actions.clearData",

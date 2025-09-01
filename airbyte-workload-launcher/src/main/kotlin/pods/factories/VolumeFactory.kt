@@ -8,6 +8,8 @@ import io.airbyte.commons.storage.STORAGE_CLAIM_NAME
 import io.airbyte.commons.storage.STORAGE_MOUNT
 import io.airbyte.commons.storage.STORAGE_VOLUME_NAME
 import io.airbyte.workers.pod.FileConstants
+import io.airbyte.workload.launcher.ArchitectureDecider
+import io.airbyte.workload.launcher.pipeline.stages.model.ArchitectureEnvironmentVariables
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaimVolumeSource
 import io.fabric8.kubernetes.api.model.SecretVolumeSourceBuilder
 import io.fabric8.kubernetes.api.model.Volume
@@ -21,8 +23,10 @@ import jakarta.inject.Singleton
 @Singleton
 data class VolumeFactory(
   @Value("\${google.application.credentials}") private val googleApplicationCredentials: String?,
-  @Value("\${airbyte.worker.job.kube.volumes.secret.secret-name}") private val secretName: String?,
-  @Value("\${airbyte.worker.job.kube.volumes.secret.mount-path}") private val secretMountPath: String?,
+  @Value("\${airbyte.worker.job.kube.volumes.gcs-creds.secret-name}") private val gcsCredsSecretName: String?,
+  @Value("\${airbyte.worker.job.kube.volumes.gcs-creds.mount-path}") private val gcsCredsMountPath: String?,
+  @Value("\${airbyte.worker.job.kube.volumes.secret.secret-name}") private val gsmCredsSecretName: String?,
+  @Value("\${airbyte.worker.job.kube.volumes.secret.mount-path}") private val gsmCredsMountPath: String?,
   @Value("\${airbyte.worker.job.kube.volumes.data-plane-creds.secret-name}") private val dataPlaneCredsSecretName: String?,
   @Value("\${airbyte.worker.job.kube.volumes.data-plane-creds.mount-path}") private val dataPlaneCredsMountPath: String?,
   @Value("\${airbyte.worker.job.kube.volumes.staging.mount-path}") private val stagingMountPath: String,
@@ -64,14 +68,35 @@ data class VolumeFactory(
     return VolumeMountPair(volume, mount)
   }
 
+  private fun socket(socketPath: String): VolumeMountPair {
+    val unixSocketVolume =
+      VolumeBuilder()
+        .withName(SOCKET_VOLUME)
+        .withNewEmptyDir()
+        .withMedium(MEMORY_MEDIUM)
+        .endEmptyDir()
+        .build()
+
+    val unixSocketVolumeMount =
+      VolumeMountBuilder()
+        .withName(SOCKET_VOLUME)
+        .withMountPath(socketPath) // common mount point for the Unix sockets
+        .build()
+    return VolumeMountPair(unixSocketVolume, unixSocketVolumeMount)
+  }
+
   private fun secret(): VolumeMountPair? {
     val hasSecrets =
-      StringUtils.isNotEmpty(secretName) &&
-        StringUtils.isNotEmpty(secretMountPath) &&
+      (StringUtils.isNotEmpty(gcsCredsSecretName) || StringUtils.isNotEmpty(gsmCredsSecretName)) &&
+        (StringUtils.isNotEmpty(gcsCredsMountPath) || StringUtils.isNotEmpty(gsmCredsMountPath)) &&
         StringUtils.isNotEmpty(googleApplicationCredentials)
+
     if (!hasSecrets) {
       return null
     }
+
+    val secretName = gcsCredsSecretName ?: gsmCredsSecretName
+    val secretMountPath = gsmCredsMountPath ?: gsmCredsMountPath
 
     val volume =
       VolumeBuilder()
@@ -255,7 +280,8 @@ data class VolumeFactory(
 
   fun replication(
     useStaging: Boolean,
-    enableAsyncProfiler: Boolean,
+    enableAsyncProfiler: Boolean = false,
+    architecture: ArchitectureEnvironmentVariables = ArchitectureDecider.buildLegacyEnvironment(),
   ): ReplicationVolumes {
     val volumes = mutableListOf<Volume>()
     val orchVolumeMounts = mutableListOf<VolumeMount>()
@@ -325,6 +351,16 @@ data class VolumeFactory(
       }
     }
 
+    if (architecture.isSocketBased()) {
+      socket(architecture.getSocketBasePath()).also {
+        volumes.add(it.volume)
+        orchVolumeMounts.add(it.mount)
+        sourceVolumeMounts.add(it.mount)
+        destVolumeMounts.add(it.mount)
+        profilerVolumeMounts.add(it.mount)
+      }
+    }
+
     return ReplicationVolumes(
       volumes,
       orchVolumeMounts,
@@ -342,6 +378,8 @@ data class VolumeFactory(
     const val SOURCE_VOLUME_NAME = "airbyte-source"
     const val STAGING_VOLUME_NAME = "airbyte-file-staging"
     const val SHARED_TMP = "shared-tmp"
+    const val SOCKET_VOLUME = "unix-socket-volume"
+    const val MEMORY_MEDIUM = "Memory"
 
     // "local" means that the connector has local file access to this volume.
     const val LOCAL_VOLUME_MOUNT = "/local"

@@ -11,19 +11,20 @@ import { FlexContainer } from "components/ui/Flex";
 import { Text } from "components/ui/Text";
 import { Tooltip } from "components/ui/Tooltip";
 
+import { useIsDataActivationConnection } from "area/connection/utils/useIsDataActivationConnection";
 import { useDeleteConnection, useDestinationDefinitionVersion } from "core/api";
 import { ConnectionStatus, ConnectionSyncStatus } from "core/api/types/AirbyteClient";
+import { useFormMode } from "core/services/ui/FormModeContext";
 import { Intent, useGeneratedIntent } from "core/utils/rbac";
 import { useConfirmationModalService } from "hooks/services/ConfirmationModal";
 import { useConnectionEditService } from "hooks/services/ConnectionEdit/ConnectionEditService";
-import { useConnectionFormService } from "hooks/services/ConnectionForm/ConnectionFormService";
 import { useModalService } from "hooks/services/Modal";
 import { useNotificationService } from "hooks/services/Notification";
 import { useDeleteModal } from "hooks/useDeleteModal";
 import { ConnectionRefreshModal } from "pages/connections/ConnectionSettingsPage/ConnectionRefreshModal";
 
 export const ConnectionActionsBlock: React.FC = () => {
-  const { mode } = useConnectionFormService();
+  const { mode } = useFormMode();
   const { connection, streamsByRefreshType } = useConnectionEditService();
   const canSyncConnection = useGeneratedIntent(Intent.RunAndCancelConnectionSyncAndRefresh);
   const canEditConnection = useGeneratedIntent(Intent.CreateOrEditConnection);
@@ -37,6 +38,7 @@ export const ConnectionActionsBlock: React.FC = () => {
   const { clearStreams } = useConnectionSyncContext();
   const { mutateAsync: deleteConnection } = useDeleteConnection();
   const onDelete = () => deleteConnection(connection);
+  const isDataActivationConnection = useIsDataActivationConnection();
 
   const onReset = useCallback(async () => {
     await clearStreams();
@@ -187,17 +189,19 @@ export const ConnectionActionsBlock: React.FC = () => {
   return (
     <Card>
       <FlexContainer direction="column" gap="xl">
-        <FormFieldLayout alignItems="center" nextSizing>
-          <FlexContainer direction="column" gap="xs">
-            <Text size="lg">
-              <FormattedMessage id="connection.actions.refreshData" />
-            </Text>
-            <Text size="xs" color="grey">
-              <FormattedMessage id="connection.actions.refreshData.description" />
-            </Text>
-          </FlexContainer>
-          <RefreshConnectionDataButton />
-        </FormFieldLayout>
+        {!isDataActivationConnection && (
+          <FormFieldLayout alignItems="center" nextSizing>
+            <FlexContainer direction="column" gap="xs">
+              <Text size="lg">
+                <FormattedMessage id="connection.actions.refreshData" />
+              </Text>
+              <Text size="xs" color="grey">
+                <FormattedMessage id="connection.actions.refreshData.description" />
+              </Text>
+            </FlexContainer>
+            <RefreshConnectionDataButton />
+          </FormFieldLayout>
+        )}
 
         <FormFieldLayout alignItems="center" nextSizing>
           <FlexContainer direction="column" gap="xs">

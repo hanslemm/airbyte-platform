@@ -86,7 +86,7 @@ object ConfigClientErrorHandler {
   fun handleError(throwable: Throwable) {
     when (throwable) {
       is ConfigNotFoundException -> throw ResourceNotFoundProblem(ProblemResourceData().resourceType(throwable.type).resourceId(throwable.configId))
-      is io.airbyte.data.exceptions.ConfigNotFoundException -> throw ResourceNotFoundProblem(
+      is io.airbyte.data.ConfigNotFoundException -> throw ResourceNotFoundProblem(
         ProblemResourceData().resourceType(throwable.type).resourceId(throwable.configId),
       )
 
@@ -156,6 +156,10 @@ object ConfigClientErrorHandler {
         } else {
           UnexpectedProblem()
         }
+      is AbstractThrowableProblem -> {
+        // No need to do anything to these, they're ready to throw
+        throwable
+      }
       else -> UnexpectedProblem()
     }
 

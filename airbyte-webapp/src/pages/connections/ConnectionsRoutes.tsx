@@ -6,19 +6,23 @@ import { LoadingPage } from "components";
 
 import { useCurrentWorkspaceLink } from "area/workspace/utils";
 
+import ConfigureDataActivationConnectionPage from "./ConfigureDataActivationConnectionPage";
+import { CreateDataActivationConnectionRoutes } from "./CreateDataActivationConnectionRoutes";
+import DataActivationMappingPage from "./DataActivationMappingPage";
 import { ConnectionRoutePaths, RoutePaths } from "../routePaths";
 
-const ConnectionTimelinePage = React.lazy(() => import("./ConnectionTimelinePage"));
 const ConfigureConnectionPage = React.lazy(() => import("./ConfigureConnectionPage"));
-const CreateConnectionPage = React.lazy(() => import("./CreateConnectionPage"));
+const ConnectionMappingsPage = React.lazy(() => import("./ConnectionMappingsPage"));
 const ConnectionPage = React.lazy(() => import("./ConnectionPage"));
 const ConnectionReplicationPage = React.lazy(() => import("./ConnectionReplicationPage"));
 const ConnectionSettingsPage = React.lazy(() => import("./ConnectionSettingsPage"));
+const ConnectionTimelinePage = React.lazy(() => import("./ConnectionTimelinePage"));
 const ConnectionTransformationPage = React.lazy(() => import("./ConnectionTransformationPage"));
-const ConnectionMappingsPage = React.lazy(() => import("./ConnectionMappingsPage"));
+const CreateConnectionPage = React.lazy(() => import("./CreateConnectionPage"));
 
 const AllConnectionsPage = React.lazy(() => import("./AllConnectionsPage"));
 const StreamStatusPage = React.lazy(() => import("./StreamStatusPage"));
+
 export const JobHistoryToTimelineRedirect = () => {
   const location = useLocation();
   const createLink = useCurrentWorkspaceLink();
@@ -66,6 +70,13 @@ export const ConnectionsRoutes: React.FC = () => {
           path={`${ConnectionRoutePaths.ConnectionNew}/${ConnectionRoutePaths.Configure}/*`}
           element={<ConfigureConnectionPage />}
         />
+        <Route
+          path={`${ConnectionRoutePaths.ConnectionNew}/${ConnectionRoutePaths.ConfigureDataActivation}`}
+          element={<CreateDataActivationConnectionRoutes />}
+        >
+          <Route index element={<DataActivationMappingPage />} />
+          <Route path={ConnectionRoutePaths.ConfigureContinued} element={<ConfigureDataActivationConnectionPage />} />
+        </Route>
         <Route path={ConnectionRoutePaths.ConnectionNew} element={<CreateConnectionPage />} />
         <Route path={ConnectionRoutePaths.Root} element={<ConnectionPage />}>
           <Route path={ConnectionRoutePaths.Status} element={<StreamStatusPage />} />

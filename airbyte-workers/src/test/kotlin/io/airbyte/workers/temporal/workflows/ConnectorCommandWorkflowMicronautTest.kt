@@ -6,8 +6,14 @@ package io.airbyte.workers.temporal.workflows
 
 import io.airbyte.api.client.AirbyteApiClient
 import io.airbyte.commons.logging.LogClientManager
+import io.airbyte.commons.storage.StorageClientFactory
+import io.airbyte.config.ConfiguredAirbyteCatalog
 import io.airbyte.workers.commands.CheckCommand
+import io.airbyte.workers.commands.CheckCommandV2
 import io.airbyte.workers.commands.DiscoverCommand
+import io.airbyte.workers.commands.DiscoverCommandV2
+import io.airbyte.workers.commands.ReplicationCommand
+import io.airbyte.workers.storage.activities.OutputStorageClient
 import io.airbyte.workers.sync.WorkloadClient
 import io.airbyte.workers.workload.WorkloadIdGenerator
 import io.micronaut.context.annotation.Bean
@@ -22,6 +28,7 @@ import java.nio.file.Path
 
 @MicronautTest
 @Property(name = "STORAGE_TYPE", value = "yo")
+@Property(name = "micronaut.http.services.workload-api.url", value = "http://localhost")
 class ConnectorCommandWorkflowMicronautTest {
   @Named("workspaceRoot")
   @Bean
@@ -44,11 +51,29 @@ class ConnectorCommandWorkflowMicronautTest {
   @Replaces(LogClientManager::class)
   var logClientManager: LogClientManager = mockk()
 
+  @Bean
+  @Replaces(StorageClientFactory::class)
+  var storageClientFactory: StorageClientFactory = mockk()
+
+  @Bean
+  @Replaces(OutputStorageClient::class)
+  @Named("outputCatalogClient")
+  var outputStorageClient: OutputStorageClient<ConfiguredAirbyteCatalog> = mockk()
+
   @Inject
   lateinit var checkCommand: CheckCommand
 
   @Inject
+  lateinit var checkCommandThroughApi: CheckCommandV2
+
+  @Inject
   lateinit var discoverCommand: DiscoverCommand
+
+  @Inject
+  lateinit var discoverCommandV2: DiscoverCommandV2
+
+  @Inject
+  lateinit var replicationCommand: ReplicationCommand
 
   @Inject
   private lateinit var connectorCommmandActivity: ConnectorCommandActivity

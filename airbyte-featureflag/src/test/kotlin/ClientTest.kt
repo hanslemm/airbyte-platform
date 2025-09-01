@@ -25,6 +25,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -450,6 +451,53 @@ class LaunchDarklyClientTest {
     LaunchDarklyClient(ldClient).boolVariation(testFlag, ctxAnon)
     assertTrue(context.captured.isAnonymous)
   }
+
+  @Test
+  fun `verify context interceptor support for bool, int and string variations`() {
+    val testBoolFlag = Temporary(key = "test-interceptor-bool", default = false)
+    val testIntFlag = Temporary(key = "test-interceptor-int", default = 0)
+    val testStringFlag = Temporary(key = "test-interceptor-string", default = "string")
+    val ctx = Workspace(ANONYMOUS)
+
+    val ldClient: LDClient = mockk()
+    val featureFlagClient = LaunchDarklyClient(ldClient)
+    val boolContextCaptor = slot<LDContext>()
+    every {
+      ldClient.boolVariation(testBoolFlag.key, capture(boolContextCaptor), any())
+    } answers {
+      true
+    }
+
+    val intContextCaptor = slot<LDContext>()
+    every {
+      ldClient.intVariation(testIntFlag.key, capture(intContextCaptor), any())
+    } answers {
+      1
+    }
+
+    val stringContextCaptor = slot<LDContext>()
+    every {
+      ldClient.stringVariation(testStringFlag.key, capture(stringContextCaptor), any())
+    } answers {
+      "yolo"
+    }
+
+    val interceptedContext = Connection(UUID.randomUUID())
+    val interceptor: ContextInterceptor =
+      mockk {
+        every { intercept(any()) } returns interceptedContext
+      }
+    featureFlagClient.registerContextInterceptor(interceptor)
+
+    featureFlagClient.boolVariation(testBoolFlag, ctx)
+    assertEquals(interceptedContext.toLDContext(), boolContextCaptor.captured)
+
+    featureFlagClient.intVariation(testIntFlag, ctx)
+    assertEquals(interceptedContext.toLDContext(), intContextCaptor.captured)
+
+    featureFlagClient.stringVariation(testStringFlag, ctx)
+    assertEquals(interceptedContext.toLDContext(), stringContextCaptor.captured)
+  }
 }
 
 class TestClientTest {
@@ -530,6 +578,26 @@ class TestClientTest {
       assertTrue { boolVariation(evFalse, ctx) }
       assertFalse("undefined flags should always return false") { boolVariation(evEmpty, ctx) }
     }
+  }
+
+  @Test
+  @Suppress("UNCHECKED_CAST")
+  fun `verify generic variation retrieval by type`() {
+    val boolFlag = Temporary(key = "flag1", default = false)
+    val intFlag = Temporary(key = "flag2", default = 0)
+    val stringFlag = Temporary(key = "flag3", default = "default")
+    val unsupportedType = Temporary(key = "flag4", default = listOf("this", "should", "fail"))
+    val nullType = Temporary(key = "flag5", default = null)
+    val values = mapOf(intFlag.key to 123, boolFlag.key to true, stringFlag.key to "test")
+    val ctx = User("test")
+
+    val client: FeatureFlagClient = TestClient(values)
+
+    assertEquals(123, client.variation(intFlag, ctx))
+    assertEquals(true, client.variation(boolFlag, ctx))
+    assertEquals("test", client.variation(stringFlag, ctx))
+    assertThrows<IllegalArgumentException> { client.variation(unsupportedType, ctx) }
+    assertThrows<IllegalArgumentException> { client.variation(nullType, ctx) }
   }
 }
 

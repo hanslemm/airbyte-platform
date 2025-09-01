@@ -5,13 +5,13 @@
 package io.airbyte.server.apis.publicapi.controllers
 
 import com.fasterxml.jackson.databind.node.ObjectNode
-import io.airbyte.api.model.generated.PermissionType
 import io.airbyte.api.problems.model.generated.ProblemValueData
 import io.airbyte.api.problems.throwable.generated.UnknownValueProblem
 import io.airbyte.api.problems.throwable.generated.UnprocessableEntityProblem
-import io.airbyte.commons.server.authorization.ApiAuthorizationHelper
-import io.airbyte.commons.server.authorization.Scope
+import io.airbyte.commons.auth.roles.AuthRoleConstants
+import io.airbyte.commons.server.authorization.RoleResolver
 import io.airbyte.commons.server.scheduling.AirbyteTaskExecutors
+import io.airbyte.commons.server.support.AuthenticationId
 import io.airbyte.commons.server.support.CurrentUserService
 import io.airbyte.publicApi.server.generated.apis.PublicSourcesApi
 import io.airbyte.publicApi.server.generated.models.InitiateOauthRequest
@@ -46,18 +46,13 @@ import java.util.UUID
 open class SourcesController(
   private val sourceService: SourceService,
   private val trackingHelper: TrackingHelper,
-  private val apiAuthorizationHelper: ApiAuthorizationHelper,
   private val currentUserService: CurrentUserService,
+  private val roleResolver: RoleResolver,
 ) : PublicSourcesApi {
+  @Secured(AuthRoleConstants.WORKSPACE_EDITOR, AuthRoleConstants.EMBEDDED_END_USER)
   @ExecuteOn(AirbyteTaskExecutors.PUBLIC_API)
   override fun publicCreateSource(sourceCreateRequest: SourceCreateRequest?): Response {
-    val userId: UUID = currentUserService.currentUser.userId
-    apiAuthorizationHelper.checkWorkspacesPermission(
-      sourceCreateRequest?.let { listOf(it.workspaceId.toString()) } ?: emptyList(),
-      Scope.WORKSPACE,
-      userId,
-      PermissionType.WORKSPACE_EDITOR,
-    )
+    val userId: UUID = currentUserService.getCurrentUser().userId
 
     val sourceDefinitionId: UUID =
       sourceCreateRequest?.definitionId
@@ -113,13 +108,13 @@ open class SourcesController(
 
   @ExecuteOn(AirbyteTaskExecutors.PUBLIC_API)
   override fun publicDeleteSource(sourceId: String): Response {
-    val userId: UUID = currentUserService.currentUser.userId
-    apiAuthorizationHelper.checkWorkspacePermission(
-      sourceId,
-      Scope.SOURCE,
-      userId,
-      PermissionType.WORKSPACE_EDITOR,
-    )
+    val userId: UUID = currentUserService.getCurrentUser().userId
+
+    roleResolver
+      .newRequest()
+      .withCurrentUser()
+      .withRef(AuthenticationId.SOURCE_ID, sourceId)
+      .requireRole(AuthRoleConstants.WORKSPACE_EDITOR)
 
     val sourceResponse: Any? =
       trackingHelper.callWithTracker(
@@ -145,20 +140,24 @@ open class SourcesController(
   }
 
   @ExecuteOn(AirbyteTaskExecutors.PUBLIC_API)
-  override fun publicGetSource(sourceId: String): Response {
-    val userId: UUID = currentUserService.currentUser.userId
-    apiAuthorizationHelper.checkWorkspacePermission(
-      sourceId,
-      Scope.SOURCE,
-      userId,
-      PermissionType.WORKSPACE_READER,
-    )
+  override fun publicGetSource(
+    sourceId: String,
+    includeSecretCoordinates: Boolean?,
+  ): Response {
+    val userId: UUID = currentUserService.getCurrentUser().userId
+
+    roleResolver
+      .newRequest()
+      .withCurrentUser()
+      .withRef(AuthenticationId.SOURCE_ID, sourceId)
+      .requireRole(AuthRoleConstants.WORKSPACE_READER)
 
     val sourceResponse: Any? =
       trackingHelper.callWithTracker(
         {
           sourceService.getSource(
             UUID.fromString(sourceId),
+            includeSecretCoordinates,
           )
         },
         SOURCES_WITH_ID_PATH,
@@ -177,17 +176,9 @@ open class SourcesController(
       .build()
   }
 
+  @Secured(AuthRoleConstants.WORKSPACE_EDITOR)
   @ExecuteOn(AirbyteTaskExecutors.PUBLIC_API)
-  override fun initiateOAuth(initiateOauthRequest: InitiateOauthRequest): Response {
-    val userId: UUID = currentUserService.currentUser.userId
-    apiAuthorizationHelper.checkWorkspacePermission(
-      initiateOauthRequest.workspaceId.toString(),
-      Scope.WORKSPACE,
-      userId,
-      PermissionType.WORKSPACE_EDITOR,
-    )
-    return sourceService.controllerInitiateOAuth(initiateOauthRequest)
-  }
+  override fun initiateOAuth(initiateOauthRequest: InitiateOauthRequest): Response = sourceService.controllerInitiateOAuth(initiateOauthRequest)
 
   @ExecuteOn(AirbyteTaskExecutors.PUBLIC_API)
   override fun listSources(
@@ -196,13 +187,17 @@ open class SourcesController(
     limit: Int,
     offset: Int,
   ): Response {
-    val userId: UUID = currentUserService.currentUser.userId
-    apiAuthorizationHelper.checkWorkspacesPermission(
-      workspaceIds?.map { it.toString() } ?: emptyList(),
-      Scope.WORKSPACES,
-      userId,
-      PermissionType.WORKSPACE_READER,
-    )
+    val userId: UUID = currentUserService.getCurrentUser().userId
+
+    // If workspace IDs were given, then verify the user has access to those workspaces.
+    // If none were given, then the SourceService determine the workspaces for the current user.
+    if (!workspaceIds.isNullOrEmpty()) {
+      roleResolver
+        .newRequest()
+        .withCurrentUser()
+        .withWorkspaces(workspaceIds)
+        .requireRole(AuthRoleConstants.WORKSPACE_READER)
+    }
 
     val safeWorkspaceIds = workspaceIds ?: emptyList()
     val sources: Any? =
@@ -233,13 +228,13 @@ open class SourcesController(
     sourceId: String,
     sourcePatchRequest: SourcePatchRequest?,
   ): Response {
-    val userId: UUID = currentUserService.currentUser.userId
-    apiAuthorizationHelper.checkWorkspacePermission(
-      sourceId,
-      Scope.SOURCE,
-      userId,
-      PermissionType.WORKSPACE_EDITOR,
-    )
+    val userId: UUID = currentUserService.getCurrentUser().userId
+
+    roleResolver
+      .newRequest()
+      .withCurrentUser()
+      .withRef(AuthenticationId.SOURCE_ID, sourceId)
+      .requireRole(AuthRoleConstants.WORKSPACE_EDITOR)
 
     val sourceResponse: Any? =
       sourcePatchRequest?.let { request ->
@@ -275,13 +270,13 @@ open class SourcesController(
     sourceId: String,
     sourcePutRequest: SourcePutRequest?,
   ): Response {
-    val userId: UUID = currentUserService.currentUser.userId
-    apiAuthorizationHelper.checkWorkspacePermission(
-      sourceId,
-      Scope.SOURCE,
-      userId,
-      PermissionType.WORKSPACE_EDITOR,
-    )
+    val userId: UUID = currentUserService.getCurrentUser().userId
+
+    roleResolver
+      .newRequest()
+      .withCurrentUser()
+      .withRef(AuthenticationId.SOURCE_ID, sourceId)
+      .requireRole(AuthRoleConstants.WORKSPACE_EDITOR)
 
     val sourceResponse: Any? =
       sourcePutRequest?.let { request ->

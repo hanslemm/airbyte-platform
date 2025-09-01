@@ -17,6 +17,7 @@ import CastIcon from "./icons/castIcon.svg?react";
 import CertifiedIcon from "./icons/certifiedIcon.svg?react";
 import ChartIcon from "./icons/chartIcon.svg?react";
 import ChatIcon from "./icons/chatIcon.svg?react";
+import CheckCircleIcon from "./icons/checkCircleIcon.svg?react";
 import CheckIcon from "./icons/checkIcon.svg?react";
 import ChevronDownIcon from "./icons/chevronDownIcon.svg?react";
 import ChevronLeftIcon from "./icons/chevronLeftIcon.svg?react";
@@ -25,6 +26,7 @@ import ChevronUpDownIcon from "./icons/chevronUpDownIcon.svg?react";
 import ChevronUpIcon from "./icons/chevronUpIcon.svg?react";
 import ClockFilledIcon from "./icons/clockFilledIcon.svg?react";
 import ClockOutlineIcon from "./icons/clockOutlineIcon.svg?react";
+import CodeIcon from "./icons/codeIcon.svg?react";
 import CollapseAllIcon from "./icons/collapseAllIcon.svg?react";
 import CommentsIcon from "./icons/commentsIcon.svg?react";
 import CommunityIcon from "./icons/communityIcon.svg?react";
@@ -186,11 +188,13 @@ export const Icons: Record<IconType, React.FC<React.SVGProps<SVGSVGElement>>> = 
   chart: ChartIcon,
   chat: ChatIcon,
   check: CheckIcon,
+  checkCircle: CheckCircleIcon,
   chevronDown: ChevronDownIcon,
   chevronLeft: ChevronLeftIcon,
   chevronRight: ChevronRightIcon,
   chevronUp: ChevronUpIcon,
   chevronUpDown: ChevronUpDownIcon,
+  code: CodeIcon,
   clockFilled: ClockFilledIcon,
   clockOutline: ClockOutlineIcon,
   comments: CommentsIcon,

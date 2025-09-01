@@ -5,37 +5,28 @@
 package io.airbyte.workload.handler
 
 import io.airbyte.api.client.AirbyteApiClient
-import io.airbyte.api.client.generated.SignalApi
-import io.airbyte.api.client.model.generated.SignalInput
-import io.airbyte.commons.json.Jsons
-import io.airbyte.config.SignalInput.Companion.SYNC_WORKFLOW
 import io.airbyte.config.WorkloadPriority
 import io.airbyte.featureflag.FeatureFlagClient
-import io.airbyte.metrics.MetricAttribute
 import io.airbyte.metrics.MetricClient
-import io.airbyte.metrics.OssMetricsRegistry
-import io.airbyte.metrics.lib.MetricTags
 import io.airbyte.workload.api.domain.WorkloadLabel
+import io.airbyte.workload.common.DefaultDeadlineValues
 import io.airbyte.workload.errors.ConflictException
 import io.airbyte.workload.errors.InvalidStatusTransitionException
 import io.airbyte.workload.errors.NotFoundException
 import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.DATAPLANE_ID
 import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.WORKLOAD_ID
-import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.metricClient
-import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.mockApi
-import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.mockApiFailingSignal
-import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.signalApi
-import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.verifyApi
-import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.verifyFailedSignal
 import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.workloadHandler
+import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.workloadQueueRepository
 import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.workloadRepository
+import io.airbyte.workload.handler.WorkloadHandlerImplTest.Fixtures.workloadService
+import io.airbyte.workload.repository.WorkloadQueueRepository
 import io.airbyte.workload.repository.WorkloadRepository
 import io.airbyte.workload.repository.domain.Workload
 import io.airbyte.workload.repository.domain.WorkloadQueueStats
 import io.airbyte.workload.repository.domain.WorkloadStatus
 import io.airbyte.workload.repository.domain.WorkloadType
-import io.micrometer.core.instrument.Counter
-import io.mockk.Called
+import io.airbyte.workload.services.WorkloadService
+import io.airbyte.workload.signal.ApiSignalSender
 import io.mockk.Runs
 import io.mockk.clearAllMocks
 import io.mockk.every
@@ -56,7 +47,9 @@ import org.junit.jupiter.params.provider.MethodSource
 import java.time.OffsetDateTime
 import java.util.Optional
 import java.util.UUID
-import io.airbyte.config.SignalInput as ConfigSignalInput
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.toJavaDuration
 
 class WorkloadHandlerImplTest {
   private val now: OffsetDateTime = OffsetDateTime.now()
@@ -71,11 +64,11 @@ class WorkloadHandlerImplTest {
   fun `verify active statuses doesn't contain terminal statuses`() {
     assertEquals(
       setOf(WorkloadStatus.PENDING, WorkloadStatus.CLAIMED, WorkloadStatus.LAUNCHED, WorkloadStatus.RUNNING),
-      WorkloadHandlerImpl.ACTIVE_STATUSES.toSet(),
+      WorkloadService.ACTIVE_STATUSES.toSet(),
     )
-    assertFalse(WorkloadHandlerImpl.ACTIVE_STATUSES.contains(WorkloadStatus.CANCELLED))
-    assertFalse(WorkloadHandlerImpl.ACTIVE_STATUSES.contains(WorkloadStatus.FAILURE))
-    assertFalse(WorkloadHandlerImpl.ACTIVE_STATUSES.contains(WorkloadStatus.SUCCESS))
+    assertFalse(WorkloadService.ACTIVE_STATUSES.contains(WorkloadStatus.CANCELLED))
+    assertFalse(WorkloadService.ACTIVE_STATUSES.contains(WorkloadStatus.FAILURE))
+    assertFalse(WorkloadService.ACTIVE_STATUSES.contains(WorkloadStatus.SUCCESS))
   }
 
   @Test
@@ -87,6 +80,8 @@ class WorkloadHandlerImplTest {
         status = WorkloadStatus.PENDING,
         workloadLabels = null,
         inputPayload = "",
+        workspaceId = UUID.randomUUID(),
+        organizationId = UUID.randomUUID(),
         logPath = "/",
         mutexKey = null,
         type = WorkloadType.SYNC,
@@ -112,7 +107,7 @@ class WorkloadHandlerImplTest {
     val workloadLabels = mutableListOf(workloadLabel1, workloadLabel2)
 
     every { workloadRepository.existsById(WORKLOAD_ID) }.returns(false)
-    every { workloadRepository.searchByMutexKeyAndStatusInList("mutex-this", WorkloadHandlerImpl.ACTIVE_STATUSES) }.returns(listOf())
+    every { workloadRepository.searchByMutexKeyAndStatusInList("mutex-this", WorkloadService.ACTIVE_STATUSES) }.returns(listOf())
     every { workloadRepository.save(any()) }.returns(
       Fixtures.workload(),
     )
@@ -120,6 +115,8 @@ class WorkloadHandlerImplTest {
       WORKLOAD_ID,
       workloadLabels,
       "input payload",
+      UUID.randomUUID(),
+      UUID.randomUUID(),
       "/log/path",
       "mutex-this",
       io.airbyte.config.WorkloadType.SYNC,
@@ -161,6 +158,8 @@ class WorkloadHandlerImplTest {
         WORKLOAD_ID,
         null,
         "",
+        UUID.randomUUID(),
+        UUID.randomUUID(),
         "",
         "mutex-this",
         io.airbyte.config.WorkloadType.SYNC,
@@ -185,16 +184,19 @@ class WorkloadHandlerImplTest {
     val newWorkload = Fixtures.workload(WORKLOAD_ID)
     every { workloadRepository.existsById(WORKLOAD_ID) }.returns(false)
     every {
-      workloadHandler.failWorkload(workloadIdWithSuccessfulFail, any(), any())
+      workloadService.failWorkload(workloadIdWithSuccessfulFail, any(), any())
     }.answers {}
     every {
-      workloadHandler.failWorkload(workloadIdWithFailedFail, any(), any())
-    }.throws(InvalidStatusTransitionException(workloadIdWithFailedFail))
+      workloadService.failWorkload(workloadIdWithFailedFail, any(), any())
+    }.throws(
+      io.airbyte.workload.services
+        .InvalidStatusTransitionException(workloadIdWithFailedFail),
+    )
     every { workloadRepository.save(any()) }.returns(newWorkload)
     every {
       workloadRepository.searchByMutexKeyAndStatusInList(
         "mutex-this",
-        WorkloadHandlerImpl.ACTIVE_STATUSES,
+        WorkloadService.ACTIVE_STATUSES,
       )
     }.returns(duplWorkloads + listOf(newWorkload))
 
@@ -202,6 +204,8 @@ class WorkloadHandlerImplTest {
       WORKLOAD_ID,
       null,
       "",
+      UUID.randomUUID(),
+      UUID.randomUUID(),
       "",
       "mutex-this",
       io.airbyte.config.WorkloadType.SYNC,
@@ -212,8 +216,8 @@ class WorkloadHandlerImplTest {
       WorkloadPriority.DEFAULT,
     )
     verify {
-      workloadHandler.failWorkload(workloadIdWithFailedFail, any(), any())
-      workloadHandler.failWorkload(workloadIdWithSuccessfulFail, any(), any())
+      workloadService.failWorkload(workloadIdWithFailedFail, any(), any())
+      workloadService.failWorkload(workloadIdWithSuccessfulFail, any(), any())
       workloadRepository.save(
         match {
           it.id == WORKLOAD_ID && it.mutexKey == "mutex-this"
@@ -251,31 +255,18 @@ class WorkloadHandlerImplTest {
 
   @ParameterizedTest
   @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED", "RUNNING"])
-  fun `test successfulHeartbeat`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-    every { workloadRepository.update(eq(WORKLOAD_ID), any(), ofType(OffsetDateTime::class), eq(now.plusMinutes(10))) }.returns(Unit)
+  fun `verify successful heartbeat`(workloadStatus: WorkloadStatus) {
+    every { workloadService.heartbeatWorkload(WORKLOAD_ID, any()) } returns Unit
     workloadHandler.heartbeat(WORKLOAD_ID, now.plusMinutes(10))
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.RUNNING), any(), eq(now.plusMinutes(10))) }
+    verify { workloadService.heartbeatWorkload(WORKLOAD_ID, now.plusMinutes(10)) }
   }
 
   @ParameterizedTest
   @EnumSource(value = WorkloadStatus::class, names = ["CANCELLED", "FAILURE", "SUCCESS", "PENDING"])
-  fun `test nonAuthorizedHeartbeat`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
+  fun `verify heartbeat failure exceptions are converted`(workloadStatus: WorkloadStatus) {
+    every { workloadService.heartbeatWorkload(WORKLOAD_ID, any()) } throws
+      io.airbyte.workload.services
+        .InvalidStatusTransitionException("oops")
     assertThrows<InvalidStatusTransitionException> { workloadHandler.heartbeat(WORKLOAD_ID, now) }
   }
 
@@ -287,6 +278,7 @@ class WorkloadHandlerImplTest {
 
   @Test
   fun `claiming a workload successfully returns true`() {
+    every { workloadQueueRepository.ackWorkloadQueueItem(WORKLOAD_ID) } just Runs
     every { workloadRepository.claim(WORKLOAD_ID, DATAPLANE_ID, any()) }.returns(
       Fixtures.workload(
         id = WORKLOAD_ID,
@@ -294,11 +286,14 @@ class WorkloadHandlerImplTest {
         status = WorkloadStatus.CLAIMED,
       ),
     )
-    assertTrue(workloadHandler.claimWorkload(WORKLOAD_ID, DATAPLANE_ID, now))
+    val result = workloadHandler.claimWorkload(WORKLOAD_ID, DATAPLANE_ID, now)
+    assertTrue(result)
+    verify(exactly = 1) { workloadQueueRepository.ackWorkloadQueueItem(WORKLOAD_ID) }
   }
 
   @Test
   fun `test claiming a workload successfully`() {
+    every { workloadQueueRepository.ackWorkloadQueueItem(WORKLOAD_ID) } just Runs
     every { workloadRepository.claim(WORKLOAD_ID, DATAPLANE_ID, any()) }.returns(
       Fixtures.workload(
         id = WORKLOAD_ID,
@@ -306,397 +301,57 @@ class WorkloadHandlerImplTest {
         dataplaneId = DATAPLANE_ID,
       ),
     )
-    assertTrue(workloadHandler.claimWorkload(WORKLOAD_ID, DATAPLANE_ID, now))
+    val result = workloadHandler.claimWorkload(WORKLOAD_ID, DATAPLANE_ID, now)
+    assertTrue(result)
+    verify(exactly = 1) { workloadQueueRepository.ackWorkloadQueueItem(WORKLOAD_ID) }
   }
 
   @Test
   fun `test claiming a workload unsuccessfully`() {
     every { workloadRepository.claim(WORKLOAD_ID, DATAPLANE_ID, any()) }.returns(null)
-    assertFalse(workloadHandler.claimWorkload(WORKLOAD_ID, DATAPLANE_ID, now))
+    val result = workloadHandler.claimWorkload(WORKLOAD_ID, DATAPLANE_ID, now)
+    assertFalse(result)
+    verify(exactly = 0) { workloadQueueRepository.ackWorkloadQueueItem(WORKLOAD_ID) }
   }
 
   @Test
-  fun `test workload not found when cancelling workload`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(Optional.empty())
+  fun `cancelling workload errors are converted`() {
+    every { workloadService.cancelWorkload(WORKLOAD_ID, any(), any()) } throws
+      io.airbyte.workload.services
+        .NotFoundException("who are you")
     assertThrows<NotFoundException> { workloadHandler.cancelWorkload(WORKLOAD_ID, "test", "test cancel") }
   }
 
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["SUCCESS", "FAILURE"])
-  fun `test cancel workload in terminal state`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-
-    assertThrows<InvalidStatusTransitionException> { workloadHandler.cancelWorkload(WORKLOAD_ID, "test", "invalid cancel") }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED", "RUNNING", "PENDING"])
-  fun `test successful cancel`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-          signalPayload = Jsons.serialize(Fixtures.configSignalInput),
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), eq("test"), eq("test cancel"), null) } just Runs
-    mockApi()
-
-    workloadHandler.cancelWorkload(WORKLOAD_ID, "test", "test cancel")
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.CANCELLED), eq("test"), eq("test cancel"), null) }
-    verifyApi()
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED", "RUNNING", "PENDING"])
-  fun `test successful cancel no signal`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-          signalPayload = null,
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), eq("test"), eq("test cancel"), null) } just Runs
-    mockApi()
-
-    workloadHandler.cancelWorkload(WORKLOAD_ID, "test", "test cancel")
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.CANCELLED), eq("test"), eq("test cancel"), null) }
-    verify { signalApi wasNot Called }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED", "RUNNING", "PENDING"])
-  fun `test failed signal cancel`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-          signalPayload = Jsons.serialize(Fixtures.configSignalInput),
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), eq("test"), eq("test cancel"), null) } just Runs
-    mockApiFailingSignal()
-
-    workloadHandler.cancelWorkload(WORKLOAD_ID, "test", "test cancel")
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.CANCELLED), eq("test"), eq("test cancel"), null) }
-    verifyFailedSignal()
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED", "RUNNING", "PENDING"])
-  fun `test failed bad signal input cancel`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-          signalPayload = "Not a valid Json",
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), eq("test"), eq("test cancel"), null) } just Runs
-    every { metricClient.count(OssMetricsRegistry.WORKLOADS_SIGNAL, any(), any()) } returns mockk<Counter>()
-    workloadHandler.cancelWorkload(WORKLOAD_ID, "test", "test cancel")
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.CANCELLED), eq("test"), eq("test cancel"), null) }
-    verify {
-      metricClient.count(
-        metric = OssMetricsRegistry.WORKLOADS_SIGNAL,
-        value = 1,
-        attributes =
-          arrayOf(
-            MetricAttribute(MetricTags.STATUS, MetricTags.FAILURE),
-            MetricAttribute(MetricTags.FAILURE_TYPE, "deserialization"),
-            any(),
-          ),
-      )
-    }
-  }
-
   @Test
-  fun `test noop cancel`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = WorkloadStatus.CANCELLED,
-        ),
-      ),
-    )
-
-    workloadHandler.cancelWorkload(WORKLOAD_ID, "test", "test cancel again")
-    verify(exactly = 0) { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.CANCELLED), "test", "test cancel again", null) }
-  }
-
-  @Test
-  fun `test workload not found when failing workload`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(Optional.empty())
-    assertThrows<NotFoundException> { workloadHandler.failWorkload(WORKLOAD_ID, "test", "fail") }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["SUCCESS", "CANCELLED"])
-  fun `test fail workload in inactive status`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-
-    assertThrows<InvalidStatusTransitionException> { workloadHandler.failWorkload(WORKLOAD_ID, "test", "fail") }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED", "RUNNING"])
-  fun `test failing workload succeeded`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-          signalPayload = Jsons.serialize(Fixtures.configSignalInput),
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), eq("test"), eq("failing a workload"), null) } just Runs
-    mockApi()
-
-    workloadHandler.failWorkload(WORKLOAD_ID, "test", "failing a workload")
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.FAILURE), eq("test"), eq("failing a workload"), null) }
-    verifyApi()
-  }
-
-  @Test
-  fun `test noop failure`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = WorkloadStatus.FAILURE,
-        ),
-      ),
-    )
-
-    workloadHandler.failWorkload(WORKLOAD_ID, "test", "noop")
-    verify(exactly = 0) { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.FAILURE), eq("test"), eq("noop"), null) }
-  }
-
-  @Test
-  fun `test workload not found when succeeding workload`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(Optional.empty())
+  fun `succeeding workload errors are converted`() {
+    every { workloadRepository.succeed(WORKLOAD_ID) } throws
+      io.airbyte.workload.services
+        .NotFoundException("where are you")
     assertThrows<NotFoundException> { workloadHandler.succeedWorkload(WORKLOAD_ID) }
   }
 
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["PENDING", "CANCELLED", "FAILURE"])
-  fun `test succeed workload in inactive status`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-
-    assertThrows<InvalidStatusTransitionException> { workloadHandler.succeedWorkload(WORKLOAD_ID) }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED", "RUNNING"])
-  fun `test succeeding workload succeeded`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-          signalPayload = Jsons.serialize(Fixtures.configSignalInput),
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), null) } just Runs
-    mockApi()
-
-    workloadHandler.succeedWorkload(WORKLOAD_ID)
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.SUCCESS), null) }
-    verifyApi()
-  }
-
   @Test
-  fun `test noop success`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = WorkloadStatus.SUCCESS,
-        ),
-      ),
-    )
-
-    workloadHandler.succeedWorkload(WORKLOAD_ID)
-    verify(exactly = 0) { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.SUCCESS), null) }
-  }
-
-  @Test
-  fun `test workload not found when setting status to running`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(Optional.empty())
-    assertThrows<NotFoundException> { workloadHandler.setWorkloadStatusToRunning(WORKLOAD_ID, now) }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["SUCCESS", "CANCELLED", "FAILURE"])
-  fun `test set workload status to running when workload is in terminal state`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-
+  fun `setting status to running errors are converted`() {
+    every { workloadRepository.running(WORKLOAD_ID, any()) } throws
+      io.airbyte.workload.services
+        .InvalidStatusTransitionException("bad timing")
     assertThrows<InvalidStatusTransitionException> { workloadHandler.setWorkloadStatusToRunning(WORKLOAD_ID, now) }
   }
 
   @Test
-  fun `test set workload status to running on unclaimed workload`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          dataplaneId = null,
-          status = WorkloadStatus.PENDING,
-        ),
-      ),
-    )
-
-    assertThrows<InvalidStatusTransitionException> { workloadHandler.setWorkloadStatusToRunning(WORKLOAD_ID, now) }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["CLAIMED", "LAUNCHED"])
-  fun `test set workload status to running succeeded`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), any()) } just Runs
-
-    workloadHandler.setWorkloadStatusToRunning(WORKLOAD_ID, now.plusMinutes(10))
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.RUNNING), eq(now.plusMinutes(10))) }
-  }
-
-  @Test
-  fun `test noop when setting workload status to running`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = WorkloadStatus.RUNNING,
-        ),
-      ),
-    )
-
-    workloadHandler.setWorkloadStatusToRunning(WORKLOAD_ID, now.plusMinutes(10))
-    verify(exactly = 0) { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.RUNNING), eq(now.plusMinutes(10))) }
-  }
-
-  @Test
-  fun `test workload not found when setting status to launched`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(Optional.empty())
-    assertThrows<NotFoundException> { workloadHandler.setWorkloadStatusToLaunched(WORKLOAD_ID, now) }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["PENDING", "SUCCESS", "CANCELLED", "FAILURE"])
-  fun `test set workload status to launched when is not in claimed state`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-
+  fun `setting status to launched errors are converted`() {
+    every { workloadRepository.launch(WORKLOAD_ID, any()) } throws
+      io.airbyte.workload.services
+        .InvalidStatusTransitionException("boom")
     assertThrows<InvalidStatusTransitionException> { workloadHandler.setWorkloadStatusToLaunched(WORKLOAD_ID, now) }
   }
 
   @Test
-  fun `test set workload status to launched succeeded`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = WorkloadStatus.CLAIMED,
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), any()) } just Runs
-
-    workloadHandler.setWorkloadStatusToLaunched(WORKLOAD_ID, now.plusMinutes(10))
-    verify { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.LAUNCHED), eq(now.plusMinutes(10))) }
-  }
-
-  @ParameterizedTest
-  @EnumSource(value = WorkloadStatus::class, names = ["LAUNCHED", "RUNNING"])
-  fun `test set workload status to launched is a noop`(workloadStatus: WorkloadStatus) {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = workloadStatus,
-        ),
-      ),
-    )
-
-    every { workloadRepository.update(any(), ofType(WorkloadStatus::class), any()) } just Runs
-
-    workloadHandler.setWorkloadStatusToLaunched(WORKLOAD_ID, now.plusMinutes(10))
-    verify(exactly = 0) { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.LAUNCHED), eq(now.plusMinutes(10))) }
-  }
-
-  @Test
-  fun `test noop when setting workload status to launched`() {
-    every { workloadRepository.findById(WORKLOAD_ID) }.returns(
-      Optional.of(
-        Fixtures.workload(
-          id = WORKLOAD_ID,
-          status = WorkloadStatus.LAUNCHED,
-        ),
-      ),
-    )
-
-    workloadHandler.setWorkloadStatusToLaunched(WORKLOAD_ID, now.plusMinutes(10))
-    verify(exactly = 0) { workloadRepository.update(eq(WORKLOAD_ID), eq(WorkloadStatus.LAUNCHED), eq(now.plusMinutes(10))) }
+  fun `failing workload errors are converted`() {
+    every { workloadRepository.fail(WORKLOAD_ID, any(), any()) } throws
+      io.airbyte.workload.services
+        .InvalidStatusTransitionException("boom")
+    assertThrows<InvalidStatusTransitionException> { workloadHandler.failWorkload(WORKLOAD_ID, "testing", "errors") }
   }
 
   @Test
@@ -723,10 +378,12 @@ class WorkloadHandlerImplTest {
   fun `offsetDateTime method should always return current time`() {
     val workloadHandlerImpl =
       WorkloadHandlerImpl(
+        mockk<WorkloadService>(),
         mockk<WorkloadRepository>(),
-        mockk<AirbyteApiClient>(),
+        mockk<WorkloadQueueRepository>(),
         mockk<MetricClient>(),
         mockk<FeatureFlagClient>(),
+        Fixtures.redeliveryWindow.toJavaDuration(),
       )
     val offsetDateTime = workloadHandlerImpl.offsetDateTime()
     Thread.sleep(10)
@@ -735,13 +392,13 @@ class WorkloadHandlerImplTest {
   }
 
   @ParameterizedTest
-  @MethodSource("getPendingWorkloadMatrix")
-  fun `poll workloads returns pending workloads`(
+  @MethodSource("pendingWorkloadMatrix")
+  fun `poll workloads returns enqueued workloads (separate table enabled)`(
     group: String,
     priority: Int,
     domainWorkloads: List<Workload>,
   ) {
-    every { workloadRepository.getPendingWorkloads(group, priority, 10) }.returns(domainWorkloads)
+    every { workloadQueueRepository.pollWorkloadQueue(group, priority, 10, any()) }.returns(domainWorkloads)
     val result = workloadHandler.pollWorkloadQueue(group, WorkloadPriority.fromInt(priority), 10)
     val expected = domainWorkloads.map { it.toApi() }
 
@@ -750,12 +407,12 @@ class WorkloadHandlerImplTest {
 
   @ParameterizedTest
   @MethodSource("countPendingWorkloadMatrix")
-  fun `count workload queue depth returns count of pending workloads`(
+  fun `count workload queue depth returns count of enqueued workloads (separate table enabled)`(
     group: String,
     priority: Int,
     count: Long,
   ) {
-    every { workloadRepository.countPendingWorkloads(group, priority) }.returns(count)
+    every { workloadQueueRepository.countEnqueuedWorkloads(group, priority) }.returns(count)
     val result = workloadHandler.countWorkloadQueueDepth(group, WorkloadPriority.fromInt(priority))
 
     assertEquals(count, result)
@@ -763,10 +420,10 @@ class WorkloadHandlerImplTest {
 
   @ParameterizedTest
   @MethodSource("workloadStatsMatrix")
-  fun `get workload queue stats returns stats with enqueued workloads for each logical queue (dataplane group x priority)`(
+  fun `get workload queue stats returns stats with enqueued workloads for each logical queue (dataplane group x priority) (separate table enabled)`(
     stats: List<WorkloadQueueStats>,
   ) {
-    every { workloadRepository.getPendingWorkloadQueueStats() }.returns(stats)
+    every { workloadQueueRepository.getEnqueuedWorkloadStats() }.returns(stats)
     val result = workloadHandler.getWorkloadQueueStats()
     val expected = stats.map { it.toApi() }
 
@@ -775,55 +432,36 @@ class WorkloadHandlerImplTest {
 
   object Fixtures {
     val workloadRepository = mockk<WorkloadRepository>()
+    val workloadQueueRepository = mockk<WorkloadQueueRepository>()
     val metricClient: MetricClient = mockk(relaxed = true)
     private val airbyteApi: AirbyteApiClient = mockk()
     val featureFlagClient: FeatureFlagClient = mockk(relaxed = true)
-    val signalApi: SignalApi = mockk()
+    val signalSender = ApiSignalSender(airbyteApi, metricClient)
+    val workloadService =
+      spyk(
+        WorkloadService(
+          workloadRepository = workloadRepository,
+          workloadQueueRepository = workloadQueueRepository,
+          signalSender = signalSender,
+          defaultDeadlineValues = DefaultDeadlineValues(),
+          featureFlagClient = featureFlagClient,
+          metricClient = metricClient,
+        ),
+      )
     const val WORKLOAD_ID = "test"
     const val DATAPLANE_ID = "dataplaneId"
-    val workloadHandler = spyk(WorkloadHandlerImpl(workloadRepository, airbyteApi, metricClient, featureFlagClient))
-
-    val configSignalInput =
-      ConfigSignalInput(
-        workflowType = SYNC_WORKFLOW,
-        workflowId = "workflowId",
+    val redeliveryWindow: Duration = 30.minutes
+    val workloadHandler =
+      spyk(
+        WorkloadHandlerImpl(
+          workloadService = workloadService,
+          workloadRepository,
+          workloadQueueRepository,
+          metricClient,
+          featureFlagClient,
+          redeliveryWindow.toJavaDuration(),
+        ),
       )
-
-    val signalInput =
-      SignalInput(
-        workflowType = configSignalInput.workflowType,
-        workflowId = configSignalInput.workflowId,
-      )
-
-    fun mockApi() {
-      every { airbyteApi.signalApi } returns signalApi
-      every { signalApi.signal(signalInput) } returns Unit
-    }
-
-    fun verifyApi() {
-      verify { signalApi.signal(signalInput) }
-    }
-
-    fun mockApiFailingSignal() {
-      every { airbyteApi.signalApi } returns signalApi
-      every { signalApi.signal(signalInput) } throws Exception("Failed to signal")
-    }
-
-    fun verifyFailedSignal() {
-      verify {
-        metricClient.count(
-          metric = OssMetricsRegistry.WORKLOADS_SIGNAL,
-          value = 1,
-          attributes =
-            arrayOf(
-              MetricAttribute(MetricTags.WORKFLOW_TYPE, signalInput.workflowType),
-              any(),
-              MetricAttribute(MetricTags.STATUS, MetricTags.FAILURE),
-              any(),
-            ),
-        )
-      }
-    }
 
     fun workload(
       id: String = WORKLOAD_ID,
@@ -831,6 +469,8 @@ class WorkloadHandlerImplTest {
       status: WorkloadStatus = WorkloadStatus.PENDING,
       workloadLabels: List<io.airbyte.workload.repository.domain.WorkloadLabel>? = listOf(),
       inputPayload: String = "",
+      workspaceId: UUID? = UUID.randomUUID(),
+      organizationId: UUID? = UUID.randomUUID(),
       logPath: String = "/",
       mutexKey: String = "",
       type: WorkloadType = WorkloadType.SYNC,
@@ -845,6 +485,8 @@ class WorkloadHandlerImplTest {
         status = status,
         workloadLabels = workloadLabels,
         inputPayload = inputPayload,
+        workspaceId = workspaceId,
+        organizationId = organizationId,
         logPath = logPath,
         mutexKey = mutexKey,
         type = type,
@@ -857,7 +499,7 @@ class WorkloadHandlerImplTest {
 
   companion object {
     @JvmStatic
-    fun getPendingWorkloadMatrix(): List<Arguments> =
+    fun pendingWorkloadMatrix(): List<Arguments> =
       listOf(
         Arguments.of("group-1", 0, listOf(Fixtures.workload("1"), Fixtures.workload("2"), Fixtures.workload("3"))),
         Arguments.of("group-2", 1, listOf(Fixtures.workload("1"), Fixtures.workload("3"))),

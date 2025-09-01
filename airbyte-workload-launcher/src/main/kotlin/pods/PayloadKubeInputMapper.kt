@@ -4,16 +4,11 @@
 
 package io.airbyte.workload.launcher.pods
 
-import com.google.common.annotations.VisibleForTesting
 import io.airbyte.commons.workers.config.WorkerConfigs
 import io.airbyte.config.WorkloadPriority
 import io.airbyte.featureflag.Connection
 import io.airbyte.featureflag.ContainerOrchestratorDevImage
-import io.airbyte.featureflag.Context
 import io.airbyte.featureflag.FeatureFlagClient
-import io.airbyte.featureflag.Multi
-import io.airbyte.featureflag.NodeSelectorOverride
-import io.airbyte.persistence.job.models.ReplicationInput
 import io.airbyte.workers.input.getAttemptId
 import io.airbyte.workers.input.getJobId
 import io.airbyte.workers.input.getOrganizationId
@@ -21,11 +16,7 @@ import io.airbyte.workers.input.usesCustomConnector
 import io.airbyte.workers.models.CheckConnectionInput
 import io.airbyte.workers.models.DiscoverCatalogInput
 import io.airbyte.workers.models.SpecInput
-import io.airbyte.workers.pod.KubeContainerInfo
-import io.airbyte.workers.pod.KubePodInfo
-import io.airbyte.workers.pod.PodLabeler
-import io.airbyte.workers.pod.PodNameGenerator
-import io.airbyte.workers.pod.ResourceConversionUtils
+import io.airbyte.workload.launcher.pipeline.stages.model.SyncPayload
 import io.airbyte.workload.launcher.pods.factories.ResourceRequirementsFactory
 import io.airbyte.workload.launcher.pods.factories.RuntimeEnvVarFactory
 import io.fabric8.kubernetes.api.model.EnvVar
@@ -52,21 +43,27 @@ class PayloadKubeInputMapper(
   private val resourceRequirementsFactory: ResourceRequirementsFactory,
   private val runTimeEnvVarFactory: RuntimeEnvVarFactory,
   private val featureFlagClient: FeatureFlagClient,
-  @Named("infraFlagContexts") private val contexts: List<Context>,
+  private val kubeNodeSelector: KubeNodeSelector,
 ) {
   fun toKubeInput(
     workloadId: String,
-    input: ReplicationInput,
+    payload: SyncPayload,
     sharedLabels: Map<String, String>,
   ): ReplicationKubeInput {
+    val input = payload.input
     val jobId = input.getJobId()
     val attemptId = input.getAttemptId()
 
     val podName = podNameGenerator.getReplicationPodName(jobId, attemptId)
-    val nodeSelectors = getNodeSelectors(input.usesCustomConnector(), replicationWorkerConfigs, input.connectionId)
+    val nodeSelectors = kubeNodeSelector.getNodeSelectors(input.usesCustomConnector(), replicationWorkerConfigs, input.connectionId)
 
     val orchImage = resolveOrchestratorImageFFOverride(input.connectionId, orchestratorKubeContainerInfo.image)
-    val orchestratorReqs = resourceRequirementsFactory.orchestrator(input)
+    val orchestratorReqs =
+      payload.architectureEnvironmentVariables
+        ?.takeIf { it.isPlatformBookkeeperMode() }
+        ?.bookkeeperResourceRequirements()
+        ?: resourceRequirementsFactory.orchestrator(input)
+
     val orchRuntimeEnvVars = runTimeEnvVarFactory.orchestratorEnvVars(input, workloadId)
 
     val sourceImage = input.sourceLauncherConfig.dockerImage.withImageRegistry()
@@ -76,7 +73,11 @@ class PayloadKubeInputMapper(
     val destinationImage = input.destinationLauncherConfig.dockerImage.withImageRegistry()
     val destinationReqs = resourceRequirementsFactory.replDestination(input)
     val destinationRuntimeEnvVars =
-      runTimeEnvVarFactory.replicationConnectorEnvVars(input.destinationLauncherConfig, destinationReqs, input.useFileTransfer)
+      runTimeEnvVarFactory.replicationConnectorEnvVars(
+        input.destinationLauncherConfig,
+        destinationReqs,
+        input.useFileTransfer && (input.omitFileTransferEnvVar == null || input.omitFileTransferEnvVar == false),
+      )
 
     val labels =
       labeler.getReplicationLabels(
@@ -88,20 +89,20 @@ class PayloadKubeInputMapper(
     val initReqs = resourceRequirementsFactory.replInit(input)
 
     return ReplicationKubeInput(
-      podName,
-      labels,
-      replicationWorkerConfigs.workerKubeAnnotations,
-      nodeSelectors,
-      orchImage,
-      sourceImage,
-      destinationImage,
-      ResourceConversionUtils.domainToApi(orchestratorReqs),
-      ResourceConversionUtils.domainToApi(sourceReqs),
-      ResourceConversionUtils.domainToApi(destinationReqs),
-      ResourceConversionUtils.domainToApi(initReqs),
-      orchRuntimeEnvVars,
-      sourceRuntimeEnvVars,
-      destinationRuntimeEnvVars,
+      podName = podName,
+      labels = labels,
+      annotations = replicationWorkerConfigs.workerKubeAnnotations,
+      nodeSelectors = nodeSelectors,
+      orchestratorImage = orchImage,
+      sourceImage = sourceImage,
+      destinationImage = destinationImage,
+      orchestratorReqs = ResourceConversionUtils.domainToApi(orchestratorReqs),
+      sourceReqs = ResourceConversionUtils.domainToApi(sourceReqs),
+      destinationReqs = ResourceConversionUtils.domainToApi(destinationReqs),
+      initReqs = ResourceConversionUtils.domainToApi(initReqs),
+      orchestratorRuntimeEnvVars = orchRuntimeEnvVars,
+      sourceRuntimeEnvVars = sourceRuntimeEnvVars,
+      destinationRuntimeEnvVars = destinationRuntimeEnvVars,
     )
   }
 
@@ -135,12 +136,18 @@ class PayloadKubeInputMapper(
         ),
       )
 
-    val nodeSelectors =
+    val workerConfigs =
       if (WorkloadPriority.DEFAULT == input.launcherConfig.priority) {
-        getNodeSelectors(input.launcherConfig.isCustomConnector, replicationWorkerConfigs)
+        replicationWorkerConfigs
       } else {
-        getNodeSelectors(input.launcherConfig.isCustomConnector, checkWorkerConfigs)
+        checkWorkerConfigs
       }
+    val nodeSelectors =
+      kubeNodeSelector.getNodeSelectors(
+        usesCustomConnector = input.launcherConfig.isCustomConnector,
+        workerConfigs = workerConfigs,
+        connectionId = input.launcherConfig.connectionId,
+      )
 
     val runtimeEnvVars = runTimeEnvVarFactory.checkConnectorEnvVars(input.launcherConfig, input.getOrganizationId(), workloadId)
     val connectorReqs = resourceRequirementsFactory.checkConnector(input)
@@ -165,7 +172,6 @@ class PayloadKubeInputMapper(
   ): ConnectorKubeInput {
     val jobId = input.getJobId()
     val attemptId = input.getAttemptId()
-
     val podName = podNameGenerator.getDiscoverPodName(input.launcherConfig.dockerImage, jobId, attemptId)
 
     val connectorPodInfo =
@@ -178,13 +184,18 @@ class PayloadKubeInputMapper(
         ),
       )
 
-    val nodeSelectors =
+    val workerConfigs =
       if (WorkloadPriority.DEFAULT == input.launcherConfig.priority) {
-        getNodeSelectors(input.launcherConfig.isCustomConnector, replicationWorkerConfigs)
+        replicationWorkerConfigs
       } else {
-        getNodeSelectors(input.usesCustomConnector(), discoverWorkerConfigs)
+        discoverWorkerConfigs
       }
-
+    val nodeSelectors =
+      kubeNodeSelector.getNodeSelectors(
+        usesCustomConnector = input.launcherConfig.isCustomConnector,
+        workerConfigs = workerConfigs,
+        connectionId = input.launcherConfig.connectionId,
+      )
     val runtimeEnvVars = runTimeEnvVarFactory.discoverConnectorEnvVars(input.launcherConfig, input.getOrganizationId(), workloadId)
     val connectorReqs = resourceRequirementsFactory.discoverConnector(input)
     val initReqs = resourceRequirementsFactory.discoverInit(input)
@@ -221,8 +232,7 @@ class PayloadKubeInputMapper(
         ),
       )
 
-    val nodeSelectors = getNodeSelectors(input.usesCustomConnector(), specWorkerConfigs)
-
+    val nodeSelectors = kubeNodeSelector.getNodeSelectors(input.usesCustomConnector(), specWorkerConfigs)
     val runtimeEnvVars = runTimeEnvVarFactory.specConnectorEnvVars(input.launcherConfig, workloadId)
     val connectorReqs = resourceRequirementsFactory.specConnector()
     val initReqs = resourceRequirementsFactory.specInit()
@@ -237,31 +247,6 @@ class PayloadKubeInputMapper(
       runtimeEnvVars,
       input.launcherConfig.workspaceId,
     )
-  }
-
-  private fun getNodeSelectors(
-    usesCustomConnector: Boolean,
-    workerConfigs: WorkerConfigs,
-    connectionId: UUID? = null,
-  ): Map<String, String> =
-    if (usesCustomConnector) {
-      workerConfigs.workerIsolatedKubeNodeSelectors.orElse(workerConfigs.getworkerKubeNodeSelectors())
-    } else {
-      getNodeSelectorsOverride(connectionId) ?: workerConfigs.getworkerKubeNodeSelectors()
-    }
-
-  private fun getNodeSelectorsOverride(connectionId: UUID?): Map<String, String>? {
-    if (contexts.isEmpty() && connectionId == null) {
-      return null
-    }
-
-    val flagContext = Multi(contexts.toMutableList().also { contextList -> connectionId?.let { contextList.add(Connection(it)) } })
-    val nodeSelectorOverride = featureFlagClient.stringVariation(NodeSelectorOverride, flagContext)
-    return if (nodeSelectorOverride.isBlank()) {
-      null
-    } else {
-      nodeSelectorOverride.toNodeSelectorMap()
-    }
   }
 
   // Return an image ref with the image registry prefix, if the image registry is configured.
@@ -316,11 +301,3 @@ data class ConnectorKubeInput(
   val runtimeEnvVars: List<EnvVar>,
   val workspaceId: UUID,
 )
-
-@VisibleForTesting
-internal fun String.toNodeSelectorMap(): Map<String, String> =
-  split(";")
-    .associate {
-      val (key, value) = it.split("=")
-      key.trim() to value.trim()
-    }

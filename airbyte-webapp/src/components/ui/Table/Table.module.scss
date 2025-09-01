@@ -21,6 +21,18 @@ $border-radius: variables.$border-radius-sm;
   &--empty {
     height: 100%;
   }
+
+  .viewMoreButton {
+    color: colors.$blue;
+    background-color: colors.$foreground;
+    border: none;
+    cursor: pointer;
+    padding: variables.$spacing-md variables.$spacing-lg;
+    font-size: variables.$font-size-sm;
+    line-height: 1.2;
+    font-weight: 400;
+    border-radius: $border-radius;
+  }
 }
 
 .thead--sticky {
@@ -37,6 +49,7 @@ $border-radius: variables.$border-radius-sm;
   text-align: left;
   font-size: 10px;
   line-height: 12px;
+  height: variables.$table-header-height;
   font-weight: 600;
   width: auto;
   padding: variables.$spacing-md variables.$spacing-lg;

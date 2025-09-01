@@ -11,8 +11,8 @@ import jakarta.inject.Singleton
 data class StreamAttemptMetadata(
   val streamName: String,
   val streamNamespace: String? = null,
-  val wasBackfilled: Boolean,
-  val wasResumed: Boolean,
+  val wasBackfilled: Boolean?,
+  val wasResumed: Boolean?,
 )
 
 @Singleton
@@ -75,5 +75,7 @@ class StreamAttemptMetadataService(
   private fun getAttemptId(
     jobId: Long,
     attemptNumber: Long,
-  ): Long = attemptsRepository.findByJobIdAndAttemptNumber(jobId, attemptNumber).id ?: throw NoSuchElementException()
+  ): Long =
+    attemptsRepository.findByJobIdAndAttemptNumber(jobId, attemptNumber)?.id
+      ?: throw NoSuchElementException("No attempt found for jobId:$jobId and attemptNumber:$attemptNumber")
 }

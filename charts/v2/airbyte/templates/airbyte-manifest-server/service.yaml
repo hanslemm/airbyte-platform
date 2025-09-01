@@ -1,0 +1,22 @@
+{{- if .Values.manifestServer.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{.Release.Name }}-airbyte-manifest-server-svc
+  {{- with .Values.manifestServer.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "airbyte.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.manifestServer.service.type }}
+  ports:
+    - port: {{ .Values.manifestServer.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "airbyte.selectorLabels" . | nindent 4 }}
+{{- end }}

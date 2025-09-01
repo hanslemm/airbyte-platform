@@ -4,7 +4,6 @@
 
 package io.airbyte.server.apis.publicapi.mappers
 
-import io.airbyte.api.model.generated.ConnectionRead
 import io.airbyte.api.model.generated.ConnectionReadList
 import io.airbyte.publicApi.server.generated.models.ConnectionsResponse
 import io.airbyte.server.apis.publicapi.constants.CONNECTIONS_PATH
@@ -48,7 +47,7 @@ object ConnectionsResponseMapper {
       next = PaginationMapper.getNextUrl(connectionReadList.connections, limit, offset, uriBuilder),
       previous = PaginationMapper.getPreviousUrl(limit, offset, uriBuilder),
       data =
-        connectionReadList.connections.map { connectionRead: ConnectionRead ->
+        connectionReadList.connections.map { connectionRead ->
           ConnectionReadMapper.from(connectionRead, connectionRead.workspaceId)
         },
     )

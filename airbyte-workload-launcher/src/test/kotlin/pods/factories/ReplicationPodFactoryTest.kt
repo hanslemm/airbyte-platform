@@ -7,11 +7,10 @@ package pods.factories
 import io.airbyte.commons.storage.STORAGE_CLAIM_NAME
 import io.airbyte.commons.storage.STORAGE_MOUNT
 import io.airbyte.commons.storage.STORAGE_VOLUME_NAME
-import io.airbyte.featureflag.PlaneName
 import io.airbyte.featureflag.TestClient
-import io.airbyte.workers.context.WorkloadSecurityContextProvider
-import io.airbyte.workers.pod.KubeContainerInfo
-import io.airbyte.workers.pod.ResourceConversionUtils
+import io.airbyte.workload.launcher.context.WorkloadSecurityContextProvider
+import io.airbyte.workload.launcher.pods.KubeContainerInfo
+import io.airbyte.workload.launcher.pods.ResourceConversionUtils
 import io.airbyte.workload.launcher.pods.factories.InitContainerFactory
 import io.airbyte.workload.launcher.pods.factories.NodeSelectionFactory
 import io.airbyte.workload.launcher.pods.factories.ProfilerContainerFactory
@@ -122,7 +121,7 @@ class ReplicationPodFactoryTest {
       )
     val nodeSelectionFactory: NodeSelectionFactory =
       mockk {
-        every { createReplicationNodeSelection(any(), any()) } returns expectedNodeSelection
+        every { createNodeSelection(any(), any()) } returns expectedNodeSelection
       }
     val fac =
       Fixtures.defaultReplicationPodFactory.copy(
@@ -146,7 +145,7 @@ class ReplicationPodFactoryTest {
       )
     val nodeSelectionFactory: NodeSelectionFactory =
       mockk {
-        every { createResetNodeSelection(any(), any()) } returns expectedNodeSelection
+        every { createResetNodeSelection(any()) } returns expectedNodeSelection
       }
     val fac =
       Fixtures.defaultReplicationPodFactory.copy(
@@ -183,8 +182,10 @@ class ReplicationPodFactoryTest {
     val defaultVolumeFactory =
       VolumeFactory(
         googleApplicationCredentials = null,
-        secretName = "test-vol-secret-name",
-        secretMountPath = "/secret-mount-path",
+        gcsCredsSecretName = null,
+        gcsCredsMountPath = null,
+        gsmCredsSecretName = "test-vol-secret-name",
+        gsmCredsMountPath = "/secret-mount-path",
         dataPlaneCredsSecretName = "test-dp-secret-name",
         dataPlaneCredsMountPath = "/dp-secret-mount-path",
         stagingMountPath = "/staging-mount-path",
@@ -199,7 +200,6 @@ class ReplicationPodFactoryTest {
       NodeSelectionFactory(
         featureFlagClient = featureFlagClient,
         tolerations = defaultTolerations,
-        infraFlagContexts = listOf(PlaneName("test")),
         spotToleration = spotToleration,
       )
 
@@ -246,6 +246,7 @@ class ReplicationPodFactoryTest {
       destRuntimeEnvVars: List<EnvVar> = emptyList(),
       isFileTransfer: Boolean = false,
       workspaceId: UUID = UUID.randomUUID(),
+      enableAsyncProfiler: Boolean = false,
     ) = factory.create(
       podName,
       allLabels,
@@ -262,7 +263,7 @@ class ReplicationPodFactoryTest {
       destRuntimeEnvVars,
       isFileTransfer,
       workspaceId,
-      false,
+      enableAsyncProfiler,
     )
 
     fun createResetWithDefaults(

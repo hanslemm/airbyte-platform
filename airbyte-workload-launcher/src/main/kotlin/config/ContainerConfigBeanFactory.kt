@@ -5,10 +5,11 @@
 package io.airbyte.workload.launcher.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.airbyte.commons.workers.config.ResourceType
 import io.airbyte.commons.workers.config.WorkerConfigs
 import io.airbyte.commons.workers.config.WorkerConfigsProvider
 import io.airbyte.config.ResourceRequirements
-import io.airbyte.workers.pod.KubeContainerInfo
+import io.airbyte.workload.launcher.pods.KubeContainerInfo
 import io.fabric8.kubernetes.api.model.LocalObjectReference
 import io.fabric8.kubernetes.api.model.Toleration
 import io.fabric8.kubernetes.api.model.TolerationBuilder
@@ -142,22 +143,19 @@ class ContainerConfigBeanFactory {
   @Singleton
   @Named("replicationWorkerConfigs")
   fun replicationWorkerConfigs(workerConfigsProvider: WorkerConfigsProvider): WorkerConfigs =
-    workerConfigsProvider.getConfig(WorkerConfigsProvider.ResourceType.REPLICATION)
+    workerConfigsProvider.getConfig(ResourceType.REPLICATION)
 
   @Singleton
   @Named("checkWorkerConfigs")
-  fun checkWorkerConfigs(workerConfigsProvider: WorkerConfigsProvider): WorkerConfigs =
-    workerConfigsProvider.getConfig(WorkerConfigsProvider.ResourceType.CHECK)
+  fun checkWorkerConfigs(workerConfigsProvider: WorkerConfigsProvider): WorkerConfigs = workerConfigsProvider.getConfig(ResourceType.CHECK)
 
   @Singleton
   @Named("discoverWorkerConfigs")
-  fun discoverWorkerConfigs(workerConfigsProvider: WorkerConfigsProvider): WorkerConfigs =
-    workerConfigsProvider.getConfig(WorkerConfigsProvider.ResourceType.DISCOVER)
+  fun discoverWorkerConfigs(workerConfigsProvider: WorkerConfigsProvider): WorkerConfigs = workerConfigsProvider.getConfig(ResourceType.DISCOVER)
 
   @Singleton
   @Named("specWorkerConfigs")
-  fun specWorkerConfigs(workerConfigsProvider: WorkerConfigsProvider): WorkerConfigs =
-    workerConfigsProvider.getConfig(WorkerConfigsProvider.ResourceType.SPEC)
+  fun specWorkerConfigs(workerConfigsProvider: WorkerConfigsProvider): WorkerConfigs = workerConfigsProvider.getConfig(ResourceType.SPEC)
 
   @Singleton
   @Named("checkConnectorReqs")

@@ -10,7 +10,7 @@ import { useCurrentWorkspace, useGetInstanceConfiguration } from "core/api";
 import { InstanceConfigurationResponseTrackingStrategy } from "core/api/types/AirbyteClient";
 import { useAuthService } from "core/services/auth";
 import { FeatureItem, useFeature } from "core/services/features";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent, useIntent } from "core/utils/rbac";
 import { useGetConnectorsOutOfDate } from "hooks/services/useConnector";
 import { SettingsRoutePaths } from "pages/routePaths";
 
@@ -24,8 +24,9 @@ export const SettingsPage: React.FC = () => {
   const licenseUi = useFeature(FeatureItem.EnterpriseLicenseChecking);
   const canViewLicenseSettings = useIntent("ViewLicenseDetails", { workspaceId });
   const displayOrganizationUsers = useFeature(FeatureItem.DisplayOrganizationUsers);
-  const canViewWorkspaceSettings = useIntent("ViewWorkspaceSettings", { workspaceId });
+  const canViewWorkspaceSettings = useGeneratedIntent(Intent.ViewWorkspaceSettings);
   const canViewOrganizationSettings = useIntent("ViewOrganizationSettings", { organizationId });
+
   const showLicenseUi = licenseUi && canViewLicenseSettings;
 
   return (
@@ -91,7 +92,7 @@ export const SettingsPage: React.FC = () => {
           )}
         </SettingsNavigationBlock>
         {multiWorkspaceUI && (canViewOrganizationSettings || canViewWorkspaceSettings) && (
-          <SettingsNavigationBlock title={formatMessage({ id: "settings.organizationSettings" })}>
+          <SettingsNavigationBlock title={formatMessage({ id: "settings.organization" })}>
             {canViewOrganizationSettings && (
               <>
                 <SettingsLink
@@ -108,6 +109,7 @@ export const SettingsPage: React.FC = () => {
                 )}
               </>
             )}
+            {/* NOTE: Keep these here or move to the side bar? */}
             {showLicenseUi && (
               <SettingsLink
                 iconType="license"

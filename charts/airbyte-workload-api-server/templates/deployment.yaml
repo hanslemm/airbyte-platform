@@ -33,7 +33,7 @@ spec:
         {{- include "airbyte.tplvalues.render" (dict "value" .Values.podAnnotations "context" $) | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: {{ .Values.global.serviceAccountName }}
+      serviceAccountName: {{ default .Values.global.serviceAccountName .Values.serviceAccountName }}
       {{- if .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- range .Values.global.imagePullSecrets }}
@@ -138,28 +138,25 @@ spec:
             configMapKeyRef:
               name: {{ .Release.Name }}-airbyte-env
               key: TRACKING_STRATEGY
-        - name: WORKLOAD_API_BEARER_TOKEN
+        - name: AB_JWT_SIGNATURE_SECRET
           valueFrom:
             secretKeyRef:
-              name: {{ index .Values "workloadApi" "bearerTokenSecretName" | default (printf "%s-airbyte-secrets" .Release.Name ) }}
-              key: {{ index .Values "workloadApi" "bearerTokenSecretKey" | default "WORKLOAD_API_BEARER_TOKEN" }}
+              name: {{ .Values.global.auth.secretName | default "airbyte-auth-secrets" | quote }}
+              key: {{ .Values.global.auth.jwtSignatureSecretKey | default "jwt-signature-secret" | quote }}
         - name: MICRONAUT_ENVIRONMENTS
           valueFrom:
             configMapKeyRef:
               name: {{ .Release.Name }}-airbyte-env
               key: WORKERS_MICRONAUT_ENVIRONMENTS
         {{- if or (eq .Values.global.edition "pro") (eq .Values.global.edition "enterprise") }}
-        - name: AIRBYTE_API_AUTH_HEADER_NAME
-          value: "X-Airbyte-Auth"
-        - name: AIRBYTE_API_AUTH_HEADER_VALUE
-          value: "Internal worker"
+        - name: API_AUTHORIZATION_ENABLED
+          value: "true"
         {{- else if and (or (eq .Values.global.edition "community") (eq .Values.global.edition "pro") (eq .Values.global.edition "enterprise")) .Values.global.auth.enabled }}
-          # Self-Managed Enterprise and Community w/ auth enabled use the same auth header, just
-          # splitting into two separate blocks for readability.
-        - name: AIRBYTE_API_AUTH_HEADER_NAME
-          value: "X-Airbyte-Auth"
-        - name: AIRBYTE_API_AUTH_HEADER_VALUE
-          value: "Internal worker"
+        - name: API_AUTHORIZATION_ENABLED
+          value: "true"
+        {{- else if and (eq .Values.global.edition "community") .Values.global.auth.enabled }}
+        - name: API_AUTHORIZATION_ENABLED
+          value: "true"
         {{- end }}
         # Database
         {{- include "airbyte.database.envs" . | nindent 8 }}

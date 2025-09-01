@@ -4,6 +4,8 @@
 .multiSelect {
   &__button {
     padding: variables.$spacing-sm;
+    min-height: variables.$form-input-height;
+    height: auto;
   }
 
   &__item {
@@ -13,13 +15,7 @@
 
   &__itemText {
     padding-block: variables.$spacing-xs;
-    padding-inline-start: variables.$spacing-md;
+    padding-inline: variables.$spacing-md;
     cursor: default;
-  }
-
-  &__removeItem {
-    all: unset;
-    padding-block: 2px;
-    padding-inline: variables.$spacing-sm;
   }
 }

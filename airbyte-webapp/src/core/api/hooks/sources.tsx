@@ -1,9 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { InfiniteData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { useIntl } from "react-intl";
 
 import { ConnectionConfiguration } from "area/connector/types";
+import { useCurrentWorkspaceId } from "area/workspace/utils";
 import { Action, Namespace, useAnalyticsService } from "core/services/analytics";
 import { isDefined } from "core/utils/common";
 
@@ -20,10 +21,12 @@ import {
 } from "../generated/AirbyteClient";
 import { SCOPE_WORKSPACE } from "../scopes";
 import {
+  ActorListFilters,
+  ActorListSortKey,
   AirbyteCatalog,
   ScopedResourceRequirements,
   SourceRead,
-  WebBackendConnectionListItem,
+  SourceReadList,
 } from "../types/AirbyteClient";
 import { useRequestErrorHandler } from "../useRequestErrorHandler";
 import { useRequestOptions } from "../useRequestOptions";
@@ -32,14 +35,32 @@ import { useSuspenseQuery } from "../useSuspenseQuery";
 export const sourcesKeys = {
   all: [SCOPE_WORKSPACE, "sources"] as const,
   lists: () => [...sourcesKeys.all, "list"] as const,
-  list: (filters: string) => [...sourcesKeys.lists(), { filters }] as const,
+  list: ({
+    pageSize,
+    filters = {},
+    sortKey,
+  }: {
+    pageSize?: number;
+    filters?: ActorListFilters;
+    sortKey?: ActorListSortKey;
+  } = {}) =>
+    [
+      ...sourcesKeys.lists(),
+      {
+        searchTerm: filters.searchTerm ?? "",
+        states: filters.states && filters.states.length > 0 ? filters.states.join(",") : "",
+        sortKey: sortKey ?? "",
+        pageSize,
+      },
+    ] as const,
   detail: (sourceId: string) => [...sourcesKeys.all, "details", sourceId] as const,
+  discoverSchema: (sourceId: string) => [...sourcesKeys.all, "discoverSchema", sourceId] as const,
 };
 
 interface ValuesProps {
   name: string;
   serviceType?: string;
-  connectionConfiguration?: ConnectionConfiguration;
+  connectionConfiguration: ConnectionConfiguration;
   resourceAllocation?: ScopedResourceRequirements;
 }
 
@@ -48,20 +69,27 @@ interface ConnectorProps {
   sourceDefinitionId: string;
 }
 
-interface SourceList {
-  sources: SourceRead[];
-}
-
-const useSourceList = (): SourceList => {
+export const useSourceList = ({
+  pageSize = 25,
+  filters,
+  sortKey,
+}: { pageSize?: number; filters?: ActorListFilters; sortKey?: ActorListSortKey } = {}) => {
   const requestOptions = useRequestOptions();
-  const workspace = useCurrentWorkspace();
+  const workspaceId = useCurrentWorkspaceId();
 
-  return useSuspenseQuery(sourcesKeys.lists(), () =>
-    listSourcesForWorkspace({ workspaceId: workspace.workspaceId }, requestOptions)
-  );
+  return useInfiniteQuery({
+    queryKey: sourcesKeys.list({ pageSize, filters, sortKey }),
+    queryFn: async ({ pageParam: cursor }) => {
+      return listSourcesForWorkspace({ workspaceId, pageSize, cursor, filters, sortKey }, requestOptions);
+    },
+    useErrorBoundary: true,
+    getPreviousPageParam: () => undefined, // Cursor based pagination on this endpoint does not support going back
+    getNextPageParam: (lastPage) =>
+      lastPage.sources.length < pageSize ? undefined : lastPage.sources.at(-1)?.sourceId,
+  });
 };
 
-const useGetSource = <T extends string | undefined | null>(
+export const useGetSource = <T extends string | undefined | null>(
   sourceId: T
 ): T extends string ? SourceRead : SourceRead | undefined => {
   const requestOptions = useRequestOptions();
@@ -83,7 +111,7 @@ export const useInvalidateSource = <T extends string | undefined | null>(sourceI
   }, [queryClient, sourceId]);
 };
 
-const useCreateSource = () => {
+export const useCreateSource = () => {
   const requestOptions = useRequestOptions();
   const queryClient = useQueryClient();
   const workspace = useCurrentWorkspace();
@@ -111,17 +139,15 @@ const useCreateSource = () => {
       }
     },
     {
-      onSuccess: (data) => {
-        queryClient.setQueryData(sourcesKeys.lists(), (lst: SourceList | undefined) => ({
-          sources: [data, ...(lst?.sources ?? [])],
-        }));
+      onSuccess: () => {
+        queryClient.resetQueries(sourcesKeys.lists());
       },
       onError,
     }
   );
 };
 
-const useDeleteSource = () => {
+export const useDeleteSource = () => {
   const requestOptions = useRequestOptions();
   const queryClient = useQueryClient();
   const analyticsService = useAnalyticsService();
@@ -129,8 +155,7 @@ const useDeleteSource = () => {
   const onError = useRequestErrorHandler("sources.deleteError");
 
   return useMutation(
-    (payload: { source: SourceRead; connectionsWithSource: WebBackendConnectionListItem[] }) =>
-      deleteSource({ sourceId: payload.source.sourceId }, requestOptions),
+    (payload: { source: SourceRead }) => deleteSource({ sourceId: payload.source.sourceId }, requestOptions),
     {
       onSuccess: (_data, ctx) => {
         analyticsService.track(Namespace.SOURCE, Action.DELETE, {
@@ -140,23 +165,26 @@ const useDeleteSource = () => {
         });
 
         queryClient.removeQueries(sourcesKeys.detail(ctx.source.sourceId));
-        queryClient.setQueryData(
-          sourcesKeys.lists(),
-          (lst: SourceList | undefined) =>
-            ({
-              sources: lst?.sources.filter((conn) => conn.sourceId !== ctx.source.sourceId) ?? [],
-            }) as SourceList
-        );
+        queryClient.setQueriesData(sourcesKeys.lists(), (oldData: InfiniteData<SourceReadList> | undefined) => {
+          return oldData
+            ? {
+                ...oldData,
+                pages: oldData.pages.map((page) => ({
+                  ...page,
+                  sources: page.sources.filter((source) => source.sourceId !== ctx.source.sourceId),
+                })),
+              }
+            : oldData;
+        });
 
-        const connectionIds = ctx.connectionsWithSource.map((item) => item.connectionId);
-        removeConnectionsFromList(connectionIds);
+        removeConnectionsFromList({ sourceId: ctx.source.sourceId });
       },
       onError,
     }
   );
 };
 
-const useUpdateSource = () => {
+export const useUpdateSource = () => {
   const requestOptions = useRequestOptions();
   const queryClient = useQueryClient();
   const onError = useRequestErrorHandler("sources.updateError");
@@ -182,7 +210,23 @@ const useUpdateSource = () => {
   );
 };
 
-const useDiscoverSchema = (
+export const useDiscoverSchemaQuery = (sourceId: string) => {
+  const requestOptions = useRequestOptions();
+
+  return useQuery(
+    sourcesKeys.discoverSchema(sourceId),
+    async () => {
+      return discoverSchemaForSource({ sourceId, disable_cache: true }, requestOptions);
+    },
+    {
+      useErrorBoundary: true,
+      cacheTime: 0, // As soon as the query is not used, it should be removed from the cache
+      staleTime: 1000 * 60 * 20, // A discovered schema should be valid for max 20 minutes on the client before refetching
+    }
+  );
+};
+
+export const useDiscoverSchema = (
   sourceId: string,
   disableCache?: boolean
 ): {
@@ -234,5 +278,3 @@ const useDiscoverSchema = (
 
   return { schemaErrorStatus, isLoading, schema, catalogId, onDiscoverSchema };
 };
-
-export { useSourceList, useGetSource, useCreateSource, useDeleteSource, useUpdateSource, useDiscoverSchema };

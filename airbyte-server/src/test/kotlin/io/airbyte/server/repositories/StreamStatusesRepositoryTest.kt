@@ -38,7 +38,7 @@ import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 import javax.sql.DataSource
 
-@MicronautTest
+@MicronautTest(rebuildContext = true)
 internal class StreamStatusesRepositoryTest {
   @BeforeEach
   fun truncate() {
@@ -855,7 +855,7 @@ internal class StreamStatusesRepositoryTest {
       // removes micronaut transactional wrapper that doesn't play nice with our non-micronaut factories
       val dataSource = (context!!.getBean(DataSource::class.java, Qualifiers.byName(DATA_SOURCE_NAME)) as DelegatingDataSource).targetDataSource
       jooqDslContext = DSLContextFactory.create(dataSource, SQLDialect.POSTGRES)
-      val databaseProviders = TestDatabaseProviders(dataSource, jooqDslContext)
+      val databaseProviders = TestDatabaseProviders(dataSource, jooqDslContext!!)
 
       // this line is what runs the migrations
       databaseProviders.createNewJobsDatabase()

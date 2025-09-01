@@ -11,8 +11,8 @@ import { Message } from "components/ui/Message";
 import { Pre } from "components/ui/Pre";
 import { Spinner } from "components/ui/Spinner";
 
-import { useAirbyteCloudIps } from "area/connector/utils/useAirbyteCloudIps";
-import { ErrorWithJobInfo } from "core/api";
+import { useAirbyteCloudIpsByDataplane } from "area/connector/utils/useAirbyteCloudIpsByDataplane";
+import { ErrorWithJobInfo, useCurrentWorkspace } from "core/api";
 import { DestinationRead, SourceRead, SupportLevel } from "core/api/types/AirbyteClient";
 import {
   Connector,
@@ -21,10 +21,11 @@ import {
   ConnectorSpecification,
   ConnectorT,
 } from "core/domain/connector";
-import { isCloudApp } from "core/utils/app";
+import { useIsCloudApp } from "core/utils/app";
 import { generateMessageFromError } from "core/utils/errorStatusMessage";
 import { links } from "core/utils/links";
 import { Intent, useGeneratedIntent } from "core/utils/rbac";
+import { useNotificationService } from "hooks/services/Notification";
 import { ConnectorCardValues, ConnectorForm, ConnectorFormValues } from "views/Connector/ConnectorForm";
 
 import { Controls } from "./components/Controls";
@@ -46,7 +47,6 @@ interface ConnectorCardBaseProps {
   onSubmit: (values: ConnectorCardValues) => Promise<void> | void;
   reloadConfig?: () => void;
   onDeleteClick?: () => void;
-  onConnectorDefinitionSelect?: (id: string) => void;
   availableConnectorDefinitions: ConnectorDefinition[];
   supportLevel?: SupportLevel;
 
@@ -64,6 +64,8 @@ interface ConnectorCardBaseProps {
   fetchingConnectorError?: Error | null;
   isLoading?: boolean;
   leftFooterSlot?: React.ReactNode;
+  hideCopyConfig?: boolean;
+  skipCheckConnection?: boolean;
 }
 
 interface ConnectorCardCreateProps extends ConnectorCardBaseProps {
@@ -79,6 +81,23 @@ const getConnectorId = (connectorRead: DestinationRead | SourceRead) => {
   return "sourceId" in connectorRead ? connectorRead.sourceId : connectorRead.destinationId;
 };
 
+const getConnectionConfigurationDefaults = (connectorDefinitionSpecification: ConnectorDefinitionSpecificationRead) => {
+  const { properties = {}, required = [] } = connectorDefinitionSpecification.connectionSpecification ?? {};
+  const props = properties as Record<string, { default?: unknown }>;
+  return Object.fromEntries(
+    Object.entries(props)
+      .filter(
+        ([key, property]) =>
+          (required as string[]).includes(key) &&
+          property &&
+          typeof property === "object" &&
+          "default" in property &&
+          property.default !== undefined
+      )
+      .map(([key, property]) => [key, property.default])
+  );
+};
+
 export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEditProps> = ({
   onSubmit,
   onDeleteClick,
@@ -88,13 +107,18 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
   headerBlock,
   supportLevel,
   leftFooterSlot = null,
+  hideCopyConfig = false,
+  skipCheckConnection = false,
   ...props
 }) => {
   const canEditConnector = useGeneratedIntent(Intent.CreateOrEditConnector);
   const [errorStatusRequest, setErrorStatusRequest] = useState<Error | null>(null);
   const { formatMessage } = useIntl();
+  const { workspaceId } = useCurrentWorkspace();
+  const { registerNotification } = useNotificationService();
 
   const { setDocumentationPanelOpen, setSelectedConnectorDefinition } = useDocumentationPanelContext();
+
   const {
     testConnector,
     isTestConnectionInProgress,
@@ -103,6 +127,7 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
     reset,
     isSuccess: connectionTestSuccess,
   } = useTestConnector(props);
+  const isCloudApp = useIsCloudApp();
   const { trackTestConnectorFailure, trackTestConnectorSuccess, trackTestConnectorStarted } =
     useAnalyticsTrackFunctions(props.formType);
 
@@ -118,10 +143,15 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
     selectedConnectorDefinitionId ||
     (selectedConnectorDefinitionSpecification && ConnectorSpecification.id(selectedConnectorDefinitionSpecification));
 
-  const selectedConnectorDefinition = useMemo(
-    () => availableConnectorDefinitions.find((s) => Connector.id(s) === selectedConnectorDefinitionSpecificationId),
-    [availableConnectorDefinitions, selectedConnectorDefinitionSpecificationId]
-  );
+  const selectedConnectorDefinition = useMemo(() => {
+    const definition = availableConnectorDefinitions.find(
+      (s) => Connector.id(s) === selectedConnectorDefinitionSpecificationId
+    );
+    if (!definition) {
+      throw new Error(`Connector definition not found for id: ${selectedConnectorDefinitionSpecificationId}`);
+    }
+    return definition;
+  }, [availableConnectorDefinitions, selectedConnectorDefinitionSpecificationId]);
 
   // Handle Doc panel
   useEffect(() => {
@@ -160,7 +190,7 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
     }
   };
 
-  const onHandleSubmit = async (values: ConnectorFormValues) => {
+  const onHandleSubmit = async (values: ConnectorFormValues, shouldSkipCheckConnection = false) => {
     if (!selectedConnectorDefinition) {
       return;
     }
@@ -173,14 +203,23 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
     };
 
     try {
-      const response = await testConnectorWithTracking(connectorCardValues);
-      if (response.jobInfo.connectorConfigurationUpdated && reloadConfig) {
-        reloadConfig();
-      } else {
+      if (shouldSkipCheckConnection) {
         await onSubmit(connectorCardValues);
+      } else {
+        const response = await testConnectorWithTracking(connectorCardValues);
+        if (response.jobInfo.connectorConfigurationUpdated && reloadConfig) {
+          reloadConfig();
+        } else {
+          await onSubmit(connectorCardValues);
+        }
       }
     } catch (e) {
       setErrorStatusRequest(e);
+      registerNotification({
+        id: "connector.submitFailed",
+        type: "error",
+        text: formatMessage({ id: "connectorForm.submitFailed" }, { name: values.name, error: String(e.message) }),
+      });
       // keep throwing the exception to inform the component the submit did not go through
       throw e;
     }
@@ -196,15 +235,22 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
   // Fill form with existing connector values otherwise set the default service name
   const formValues = useMemo(() => {
     if (isEditMode && connector) {
-      return connector;
+      return {
+        ...connector,
+        connectionConfiguration: {
+          ...getConnectionConfigurationDefaults(selectedConnectorDefinitionSpecification!),
+          ...connector.connectionConfiguration,
+        },
+      };
     }
-    return { name: selectedConnectorDefinition?.name };
-  }, [isEditMode, connector, selectedConnectorDefinition?.name]);
+    return { name: selectedConnectorDefinition.name };
+  }, [isEditMode, connector, selectedConnectorDefinition.name, selectedConnectorDefinitionSpecification]);
 
   return (
     <ConnectorForm
       canEdit={canEditConnector && (isConnectorEntitled || !connector)}
       trackDirtyChanges
+      formId={props.formId}
       headerBlock={
         <FlexContainer direction="column" className={styles.header}>
           {headerBlock}
@@ -213,7 +259,7 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
             <div className={styles.loaderContainer}>
               <Spinner />
               <div className={styles.loadingMessage}>
-                <ShowLoadingMessage connector={selectedConnectorDefinition?.name} />
+                <ShowLoadingMessage connector={selectedConnectorDefinition.name} />
               </div>
             </div>
           )}
@@ -239,13 +285,13 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
       selectedConnectorDefinitionSpecification={selectedConnectorDefinitionSpecification}
       isTestConnectionInProgress={isTestConnectionInProgress}
       connectionTestSuccess={connectionTestSuccess}
-      onSubmit={onHandleSubmit}
+      onSubmit={(values) => onHandleSubmit(values, skipCheckConnection)}
       formValues={formValues}
       connectorId={connectorId}
       renderFooter={({ dirty, isSubmitting, isValid, resetConnectorForm, getValues }) =>
         selectedConnectorDefinitionSpecification && (
           <>
-            {isCloudApp() &&
+            {isCloudApp &&
               selectedConnectorDefinition &&
               "sourceDefinitionId" in selectedConnectorDefinition &&
               selectedConnectorDefinition.sourceType === "database" && <AllowlistIpBanner connectorId={connectorId} />}
@@ -272,8 +318,32 @@ export const ConnectorCard: React.FC<ConnectorCardCreateProps | ConnectorCardEdi
               onCancelClick={() => {
                 resetConnectorForm();
               }}
+              onSubmitWithoutCheck={async () => {
+                const values = getValues();
+                await onHandleSubmit(values, true);
+                registerNotification({
+                  id: "connector.saveWithoutCheckSuccessful",
+                  type: "success",
+                  text: formatMessage({ id: "connectorForm.saveWithoutCheckSuccessful" }, { name: values.name }),
+                });
+              }}
               connectionTestSuccess={connectionTestSuccess}
               leftSlot={leftFooterSlot}
+              onCopyConfig={
+                hideCopyConfig
+                  ? undefined
+                  : () => {
+                      const values = getValues();
+                      const definitionId = selectedConnectorDefinition ? Connector.id(selectedConnectorDefinition) : "";
+                      return {
+                        name: values.name,
+                        workspaceId,
+                        definitionId,
+                        config: values.connectionConfiguration as Record<string, unknown>,
+                        schema: selectedConnectorDefinitionSpecification?.connectionSpecification,
+                      };
+                    }
+              }
             />
           </>
         )
@@ -312,7 +382,7 @@ const AllowlistIpBanner = ({ connectorId }: { connectorId: string | undefined })
           initiallyOpen={connectorId ? allowlistIpsOpen ?? true : true}
           onClick={(newOpenState) => setAllowlistIpsOpen(newOpenState)}
         >
-          <Pre>{useAirbyteCloudIps().join("\n")}</Pre>
+          <Pre>{useAirbyteCloudIpsByDataplane().join("\n")}</Pre>
         </Collapsible>
       </Box>
     </Message>

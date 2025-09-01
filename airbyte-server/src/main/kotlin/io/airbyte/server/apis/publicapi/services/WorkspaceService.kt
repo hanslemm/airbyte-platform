@@ -13,10 +13,10 @@ import io.airbyte.api.model.generated.SlackNotificationConfiguration
 import io.airbyte.api.model.generated.WorkspaceCreate
 import io.airbyte.api.model.generated.WorkspaceIdRequestBody
 import io.airbyte.api.model.generated.WorkspaceUpdate
-import io.airbyte.commons.server.handlers.ResourceBootstrapHandlerInterface
+import io.airbyte.commons.DEFAULT_ORGANIZATION_ID
 import io.airbyte.commons.server.handlers.WorkspacesHandler
 import io.airbyte.commons.server.support.CurrentUserService
-import io.airbyte.config.persistence.OrganizationPersistence.DEFAULT_ORGANIZATION_ID
+import io.airbyte.data.services.DataplaneGroupService
 import io.airbyte.publicApi.server.generated.models.EmailNotificationConfig
 import io.airbyte.publicApi.server.generated.models.NotificationConfig
 import io.airbyte.publicApi.server.generated.models.NotificationsConfig
@@ -36,11 +36,11 @@ import io.airbyte.server.apis.publicapi.constants.WORKSPACES_PATH
 import io.airbyte.server.apis.publicapi.constants.WORKSPACES_WITH_ID_PATH
 import io.airbyte.server.apis.publicapi.errorHandlers.ConfigClientErrorHandler
 import io.airbyte.server.apis.publicapi.mappers.WorkspaceResponseMapper
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micronaut.context.annotation.Secondary
 import io.micronaut.context.annotation.Value
 import jakarta.inject.Singleton
 import jakarta.ws.rs.core.Response
-import org.slf4j.LoggerFactory
 import java.util.UUID
 
 interface WorkspaceService {
@@ -86,6 +86,8 @@ interface WorkspaceService {
   ): Response
 }
 
+private val log = KotlinLogging.logger {}
+
 @Singleton
 @Secondary
 open class WorkspaceServiceImpl(
@@ -94,12 +96,8 @@ open class WorkspaceServiceImpl(
   private val workspacesHandler: WorkspacesHandler,
   @Value("\${airbyte.api.host}") open val publicApiHost: String,
   private val currentUserService: CurrentUserService,
-  private val resourceBootstrapHandler: ResourceBootstrapHandlerInterface,
+  private val dataplaneGroupService: DataplaneGroupService,
 ) : WorkspaceService {
-  companion object {
-    private val log = LoggerFactory.getLogger(WorkspaceServiceImpl::class.java)
-  }
-
   /**
    * Creates a workspace.
    */
@@ -110,25 +108,29 @@ open class WorkspaceServiceImpl(
     val workspaceCreate =
       WorkspaceCreate()
         .name(workspaceCreateRequest.name)
-        .email(currentUserService.currentUser.email)
+        .email(currentUserService.getCurrentUser().email)
         .organizationId(organizationId)
         .notificationSettings(workspaceCreateRequest.notifications?.toNotificationSettings())
+    if (workspaceCreateRequest.regionId != null) {
+      workspaceCreate.dataplaneGroupId = dataplaneGroupService.getDataplaneGroup(workspaceCreateRequest.regionId!!).id
+    }
 
     val result =
       kotlin
         .runCatching { workspacesHandler.createWorkspace(workspaceCreate) }
         .onFailure {
-          log.error("Error for createWorkspace", it)
+          log.error(it) { "Error for createWorkspace" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     return WorkspaceResponseMapper.from(
       result.getOrNull()!!,
+      dataplaneGroupService.getDataplaneGroup(result.getOrNull()!!.dataplaneGroupId).name,
     )
   }
 
   override fun controllerCreateWorkspace(workspaceCreateRequest: WorkspaceCreateRequest): Response {
-    val userId: UUID = currentUserService.currentUser.userId
+    val userId: UUID = currentUserService.getCurrentUser().userId
 
     val workspaceResponse: WorkspaceResponse =
       trackingHelper.callWithTracker(
@@ -162,23 +164,31 @@ open class WorkspaceServiceImpl(
         this.workspaceId = workspaceId
         this.notificationsConfig = workspaceUpdateRequest.notifications.toInternalNotificationConfig()
       }
+    if (workspaceUpdateRequest.regionId != null) {
+      workspaceUpdate.apply {
+        this.dataplaneGroupId = dataplaneGroupService.getDataplaneGroup(workspaceUpdateRequest.regionId!!).id
+      }
+    }
 
     val result =
       kotlin
         .runCatching { workspacesHandler.updateWorkspace(workspaceUpdate) }
         .onFailure {
-          log.error("Error for updateWorkspace", it)
+          log.error(it) { "Error for updateWorkspace" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
-    return WorkspaceResponseMapper.from(result.getOrNull()!!)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
+    return WorkspaceResponseMapper.from(
+      result.getOrNull()!!,
+      dataplaneGroupService.getDataplaneGroup(result.getOrNull()!!.dataplaneGroupId).name,
+    )
   }
 
   override fun controllerUpdateWorkspace(
     workspaceId: UUID,
     workspaceUpdateRequest: WorkspaceUpdateRequest,
   ): Response {
-    val userId: UUID = currentUserService.currentUser.userId
+    val userId: UUID = currentUserService.getCurrentUser().userId
 
     val workspaceResponse: Any =
       trackingHelper.callWithTracker(
@@ -208,15 +218,15 @@ open class WorkspaceServiceImpl(
       kotlin
         .runCatching { workspacesHandler.getWorkspace(workspaceIdRequestBody) }
         .onFailure {
-          log.error("Error for getWorkspace", it)
+          log.error(it) { "Error for getWorkspace" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
-    return WorkspaceResponseMapper.from(result.getOrNull()!!)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
+    return WorkspaceResponseMapper.from(result.getOrNull()!!, dataplaneGroupService.getDataplaneGroup(result.getOrNull()!!.dataplaneGroupId).name)
   }
 
   override fun controllerGetWorkspace(workspaceId: UUID): Response {
-    val userId: UUID = currentUserService.currentUser.userId
+    val userId: UUID = currentUserService.getCurrentUser().userId
 
     val workspaceResponse: Any? =
       trackingHelper.callWithTracker(
@@ -250,14 +260,14 @@ open class WorkspaceServiceImpl(
       kotlin
         .runCatching { workspacesHandler.deleteWorkspace(workspaceIdRequestBody) }
         .onFailure {
-          log.error("Error for deleteWorkspace", it)
+          log.error(it) { "Error for deleteWorkspace" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
   }
 
   override fun controllerDeleteWorkspace(workspaceId: UUID): Response {
-    val userId: UUID = currentUserService.currentUser.userId
+    val userId: UUID = currentUserService.getCurrentUser().userId
 
     val workspaceResponse: Any? =
       trackingHelper.callWithTracker(
@@ -287,8 +297,8 @@ open class WorkspaceServiceImpl(
   ): WorkspacesResponse {
     val pagination: Pagination = Pagination().pageSize(limit).rowOffset(offset)
 
-    val workspaceIdsToQuery = workspaceIds.ifEmpty { userService.getAllWorkspaceIdsForUser(currentUserService.currentUser.userId) }
-    log.debug("Workspaces to query: {}", workspaceIdsToQuery)
+    val workspaceIdsToQuery = workspaceIds.ifEmpty { userService.getAllWorkspaceIdsForUser(currentUserService.getCurrentUser().userId) }
+    log.debug { "Workspaces to query: $workspaceIdsToQuery" }
     val listResourcesForWorkspacesRequestBody = ListResourcesForWorkspacesRequestBody()
     listResourcesForWorkspacesRequestBody.includeDeleted = includeDeleted
     listResourcesForWorkspacesRequestBody.pagination = pagination
@@ -297,13 +307,16 @@ open class WorkspaceServiceImpl(
       kotlin
         .runCatching { workspacesHandler.listWorkspacesPaginated(listResourcesForWorkspacesRequestBody) }
         .onFailure {
-          log.error("Error for listWorkspaces", it)
+          log.error(it) { "Error for listWorkspaces" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     return io.airbyte.server.apis.publicapi.mappers.WorkspacesResponseMapper.from(
       result.getOrNull()!!,
       workspaceIds,
+      result.getOrNull()!!.workspaces.map {
+        dataplaneGroupService.getDataplaneGroup(it.dataplaneGroupId).name
+      },
       includeDeleted,
       limit,
       offset,
@@ -317,7 +330,7 @@ open class WorkspaceServiceImpl(
     limit: Int,
     offset: Int,
   ): Response {
-    val userId: UUID = currentUserService.currentUser.userId
+    val userId: UUID = currentUserService.getCurrentUser().userId
 
     val workspaces: Any? =
       trackingHelper.callWithTracker(
@@ -352,12 +365,12 @@ open class WorkspaceServiceImpl(
 
 fun NotificationsConfig.toNotificationSettings() =
   NotificationSettings()
-    .sendOnFailure(failure?.toNotificationItem())
-    .sendOnSuccess(success?.toNotificationItem())
-    .sendOnConnectionUpdate(connectionUpdate?.toNotificationItem())
-    .sendOnConnectionUpdateActionRequired(connectionUpdateActionRequired?.toNotificationItem())
-    .sendOnSyncDisabled(syncDisabled?.toNotificationItem())
-    .sendOnSyncDisabledWarning(syncDisabledWarning?.toNotificationItem())
+    .sendOnFailure(failure?.toNotificationItem(enableEmailByDefault = true))
+    .sendOnSuccess(success?.toNotificationItem(enableEmailByDefault = false))
+    .sendOnConnectionUpdate(connectionUpdate?.toNotificationItem(enableEmailByDefault = true))
+    .sendOnConnectionUpdateActionRequired(connectionUpdateActionRequired?.toNotificationItem(enableEmailByDefault = true))
+    .sendOnSyncDisabled(syncDisabled?.toNotificationItem(enableEmailByDefault = true))
+    .sendOnSyncDisabledWarning(syncDisabledWarning?.toNotificationItem(enableEmailByDefault = true))
 
 private fun NotificationsConfig?.toInternalNotificationConfig() =
   this?.let {
@@ -394,7 +407,15 @@ private fun WebhookNotificationConfig?.toInternalWebhookNotificationConfig() =
       .url(it.url)
   }
 
-private fun NotificationConfig.toNotificationItem() =
-  NotificationItem()
-    .notificationType(if (this.webhook?.enabled == true) listOf(NotificationType.SLACK) else emptyList())
-    .slackConfiguration(SlackNotificationConfiguration().webhook(this.webhook?.url))
+private fun NotificationConfig.toNotificationItem(enableEmailByDefault: Boolean): NotificationItem {
+  val item = NotificationItem()
+  if (this.webhook?.enabled == true) {
+    item.addNotificationTypeItem(NotificationType.SLACK)
+    item.slackConfiguration(SlackNotificationConfiguration().webhook(this.webhook?.url))
+  }
+
+  if (this.email?.enabled == true || (enableEmailByDefault && this.email == null)) {
+    item.addNotificationTypeItem(NotificationType.CUSTOMERIO)
+  }
+  return item
+}

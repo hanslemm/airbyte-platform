@@ -22,6 +22,8 @@ import io.airbyte.api.model.generated.SyncMode
 import io.airbyte.api.problems.model.generated.ProblemMessageData
 import io.airbyte.api.problems.throwable.generated.BadRequestProblem
 import io.airbyte.api.problems.throwable.generated.UnexpectedProblem
+import io.airbyte.commons.json.Jsons
+import io.airbyte.commons.server.helpers.CatalogConfigDiffHelper
 import io.airbyte.publicApi.server.generated.models.AirbyteApiConnectionSchedule
 import io.airbyte.publicApi.server.generated.models.ConfiguredStreamMapper
 import io.airbyte.publicApi.server.generated.models.ConnectionSyncModeEnum
@@ -65,6 +67,7 @@ object AirbyteCatalogHelper {
       updatedStreamConfiguration.cursorField = it.cursorField
       updatedStreamConfiguration.fieldSelectionEnabled = it.fieldSelectionEnabled
       updatedStreamConfiguration.selected = it.selected
+      updatedStreamConfiguration.includeFiles = it.includeFiles
       updatedStreamConfiguration.selectedFields = it.selectedFields
       updatedStreamConfiguration.suggested = it.suggested
     }
@@ -93,39 +96,6 @@ object AirbyteCatalogHelper {
   }
 
   /**
-   * Given a reference catalog and a user's passed in streamConfigurations, ensure valid streams or
-   * throw a problem to be returned to the user.
-   *
-   * @param referenceCatalog - catalog, usually from discoverSourceSchema
-   * @param streamConfigurations - configurations passed in by the user.
-   * @return boolean so we can callWithTracker
-   */
-  fun validateStreams(
-    referenceCatalog: AirbyteCatalog,
-    streamConfigurations: StreamConfigurations,
-  ): Boolean {
-    val validStreams = getValidStreams(referenceCatalog)
-    val alreadyConfiguredStreams: MutableSet<String> = HashSet()
-    for (streamConfiguration in streamConfigurations.streams!!) {
-      if (!validStreams.containsKey(streamConfiguration.name)) {
-        throw BadRequestProblem(
-          ProblemMessageData().message(
-            "Invalid stream found. The list of valid streams include: ${validStreams.keys}.",
-          ),
-        )
-      } else if (alreadyConfiguredStreams.contains(streamConfiguration.name)) {
-        throw BadRequestProblem(
-          ProblemMessageData().message(
-            "Duplicate stream found in configuration for: ${streamConfiguration.name}.",
-          ),
-        )
-      }
-      alreadyConfiguredStreams.add(streamConfiguration.name)
-    }
-    return true
-  }
-
-  /**
    * Validate field selection for a single stream.
    *
    * @param streamConfiguration The configuration input of a specific stream provided by the caller.
@@ -141,7 +111,7 @@ object AirbyteCatalogHelper {
       return
     }
 
-    val allTopLevelStreamFields = getStreamTopLevelFields(sourceStream.jsonSchema).toSet()
+    val allTopLevelStreamFields = CatalogConfigDiffHelper.getStreamTopLevelFields(sourceStream.jsonSchema).toSet()
     if (streamConfiguration.selectedFields!!.isEmpty()) {
       // User puts an empty list of selected fields to sync, which is a bad request.
       throw BadRequestProblem(
@@ -187,10 +157,16 @@ object AirbyteCatalogHelper {
         ),
       )
     }
-    // 3. Selected fields must contain primary key(s) in dedup mode.
-    if (streamConfiguration.syncMode == ConnectionSyncModeEnum.INCREMENTAL_DEDUPED_HISTORY ||
-      streamConfiguration.syncMode == ConnectionSyncModeEnum.FULL_REFRESH_OVERWRITE_DEDUPED
-    ) {
+
+    val requiredPrimaryKeySyncModes =
+      listOf(
+        ConnectionSyncModeEnum.INCREMENTAL_DEDUPED_HISTORY,
+        ConnectionSyncModeEnum.FULL_REFRESH_OVERWRITE_DEDUPED,
+        ConnectionSyncModeEnum.INCREMENTAL_UPDATE,
+        ConnectionSyncModeEnum.FULL_REFRESH_UPDATE,
+      )
+    // 3. Selected fields must contain primary key(s) in dedup and update modes.
+    if (streamConfiguration.syncMode != null && requiredPrimaryKeySyncModes.contains(streamConfiguration.syncMode)) {
       val primaryKeys = selectPrimaryKey(sourceStream, streamConfiguration)
       val primaryKeyFields = primaryKeys?.mapNotNull { it.firstOrNull() } ?: emptyList()
       require(primaryKeyFields.all { it in allSelectedFieldsSet }) {
@@ -208,6 +184,8 @@ object AirbyteCatalogHelper {
       setOf(
         ConnectionSyncModeEnum.INCREMENTAL_DEDUPED_HISTORY,
         ConnectionSyncModeEnum.INCREMENTAL_APPEND,
+        ConnectionSyncModeEnum.INCREMENTAL_UPDATE,
+        ConnectionSyncModeEnum.INCREMENTAL_SOFT_DELETE,
       )
     if (streamConfiguration.syncMode in incrementalSyncModes) {
       val cursorField = selectCursorField(sourceStream, streamConfiguration)
@@ -221,21 +199,6 @@ object AirbyteCatalogHelper {
         )
       }
     }
-  }
-
-  /**
-   * Given an AirbyteCatalog, return a map of valid streams where key == name and value == the stream
-   * config.
-   *
-   * @param airbyteCatalog Airbyte catalog to pull streams out of
-   * @return map of stream name: stream config
-   */
-  fun getValidStreams(airbyteCatalog: AirbyteCatalog): Map<String, AirbyteStreamAndConfiguration> {
-    val validStreams: MutableMap<String, AirbyteStreamAndConfiguration> = HashMap()
-    for (schemaStream in airbyteCatalog.streams) {
-      validStreams[schemaStream.stream!!.name] = schemaStream
-    }
-    return validStreams
   }
 
   /**
@@ -287,19 +250,15 @@ object AirbyteCatalogHelper {
     // check that the first seconds and hour values are not *
   }
 
-  fun normalizeCronExpression(connectionSchedule: AirbyteApiConnectionSchedule?): AirbyteApiConnectionSchedule? =
-    connectionSchedule?.let { schedule ->
-      schedule.cronExpression?.let { cronExpression ->
-        if (cronExpression.endsWith("UTC")) {
-          AirbyteApiConnectionSchedule(
-            scheduleType = connectionSchedule.scheduleType,
-            cronExpression = connectionSchedule.cronExpression?.replace("UTC", "")?.trim(),
-          )
-        } else {
-          connectionSchedule
-        }
-      }
+  fun normalizeCronExpression(connectionSchedule: AirbyteApiConnectionSchedule?): AirbyteApiConnectionSchedule? {
+    if (connectionSchedule?.cronExpression == null) return connectionSchedule
+    val cron = connectionSchedule.cronExpression!!
+    return if (cron.endsWith("UTC")) {
+      connectionSchedule.copy(cronExpression = cron.replace("UTC", "").trim())
+    } else {
+      connectionSchedule
     }
+  }
 
   /**
    * Convert proto/object from public_api model to airbyte_api model.
@@ -319,77 +278,6 @@ object AirbyteCatalogHelper {
       type = mapperTypeConverter(publicApiMappers.type)
       mapperConfiguration = publicApiMappers.mapperConfiguration
     }
-
-  fun updateAirbyteStreamConfiguration(
-    config: AirbyteStreamConfiguration,
-    airbyteStream: AirbyteStream,
-    streamConfiguration: StreamConfiguration,
-  ): AirbyteStreamConfiguration {
-    val updatedStreamConfiguration = AirbyteStreamConfiguration()
-    // Set stream config as selected
-    updatedStreamConfiguration.selected = true
-    updatedStreamConfiguration.aliasName = config.aliasName
-    updatedStreamConfiguration.fieldSelectionEnabled = config.fieldSelectionEnabled
-    updatedStreamConfiguration.selectedFields = config.selectedFields
-
-    if (streamConfiguration.selectedFields != null) {
-      // Override and update
-      updatedStreamConfiguration.fieldSelectionEnabled = true
-      updatedStreamConfiguration.selectedFields = streamConfiguration.selectedFields!!.map { selectedFieldInfoConverter(it) }
-    }
-    updatedStreamConfiguration.suggested = config.suggested
-
-    updatedStreamConfiguration.mappers = config.mappers
-    if (streamConfiguration.mappers != null) {
-      updatedStreamConfiguration.mappers = streamConfiguration.mappers!!.map { configuredMapperConverter(it) }
-    }
-
-    if (streamConfiguration.syncMode == null) {
-      updatedStreamConfiguration.syncMode = SyncMode.FULL_REFRESH
-      updatedStreamConfiguration.destinationSyncMode = DestinationSyncMode.OVERWRITE
-      updatedStreamConfiguration.cursorField = config.cursorField
-      updatedStreamConfiguration.primaryKey = config.primaryKey
-    } else {
-      when (streamConfiguration.syncMode) {
-        ConnectionSyncModeEnum.FULL_REFRESH_APPEND -> {
-          updatedStreamConfiguration.syncMode = SyncMode.FULL_REFRESH
-          updatedStreamConfiguration.destinationSyncMode = DestinationSyncMode.APPEND
-          updatedStreamConfiguration.cursorField = config.cursorField
-          updatedStreamConfiguration.primaryKey = config.primaryKey
-        }
-
-        ConnectionSyncModeEnum.FULL_REFRESH_OVERWRITE_DEDUPED -> {
-          updatedStreamConfiguration.syncMode = SyncMode.FULL_REFRESH
-          updatedStreamConfiguration.destinationSyncMode = DestinationSyncMode.OVERWRITE_DEDUP
-          updatedStreamConfiguration.cursorField = config.cursorField
-          updatedStreamConfiguration.primaryKey = selectPrimaryKey(airbyteStream, streamConfiguration)
-        }
-
-        ConnectionSyncModeEnum.INCREMENTAL_APPEND -> {
-          updatedStreamConfiguration.syncMode(SyncMode.INCREMENTAL)
-          updatedStreamConfiguration.destinationSyncMode(DestinationSyncMode.APPEND)
-          updatedStreamConfiguration.cursorField(selectCursorField(airbyteStream, streamConfiguration))
-          updatedStreamConfiguration.primaryKey(selectPrimaryKey(airbyteStream, streamConfiguration))
-        }
-
-        ConnectionSyncModeEnum.INCREMENTAL_DEDUPED_HISTORY -> {
-          updatedStreamConfiguration.syncMode = SyncMode.INCREMENTAL
-          updatedStreamConfiguration.destinationSyncMode = DestinationSyncMode.APPEND_DEDUP
-          updatedStreamConfiguration.cursorField = selectCursorField(airbyteStream, streamConfiguration)
-          updatedStreamConfiguration.primaryKey = selectPrimaryKey(airbyteStream, streamConfiguration)
-        }
-
-        else -> {
-          updatedStreamConfiguration.syncMode = SyncMode.FULL_REFRESH
-          updatedStreamConfiguration.destinationSyncMode = DestinationSyncMode.OVERWRITE
-          updatedStreamConfiguration.cursorField = config.cursorField
-          updatedStreamConfiguration.primaryKey = config.primaryKey
-        }
-      }
-    }
-
-    return updatedStreamConfiguration
-  }
 
   private fun selectCursorField(
     airbyteStream: AirbyteStream,
@@ -430,7 +318,8 @@ object AirbyteCatalogHelper {
     validateFieldSelection(streamConfiguration, airbyteStream)
 
     // 2. validate that sync and destination modes are valid
-    if (streamConfiguration.syncMode == null) {
+    // Not passing in a sync mode gets mapped to FULL_REFRESH_OVERWRITE
+    if (streamConfiguration.syncMode == null || streamConfiguration.syncMode == ConnectionSyncModeEnum.FULL_REFRESH_OVERWRITE) {
       return true
     }
     val validCombinedSyncModes: Set<ConnectionSyncModeEnum> = validCombinedSyncModes(airbyteStream.supportedSyncModes, validDestinationSyncModes)
@@ -450,6 +339,10 @@ object AirbyteCatalogHelper {
 
       ConnectionSyncModeEnum.INCREMENTAL_DEDUPED_HISTORY -> {
         validateCursorField(streamConfiguration.cursorField, airbyteStream)
+        validatePrimaryKey(streamConfiguration.primaryKey, airbyteStream)
+      }
+
+      ConnectionSyncModeEnum.FULL_REFRESH_UPDATE, ConnectionSyncModeEnum.INCREMENTAL_UPDATE -> {
         validatePrimaryKey(streamConfiguration.primaryKey, airbyteStream)
       }
 
@@ -477,7 +370,7 @@ object AirbyteCatalogHelper {
     } else {
       if (!cursorField.isNullOrEmpty()) {
         // validate cursor field
-        val validCursorFields: List<List<String>> = getStreamFields(airbyteStream.jsonSchema!!)
+        val validCursorFields: List<List<String>> = getStreamFields(airbyteStream.jsonSchema ?: Jsons.emptyObject())
         if (!validCursorFields.contains(cursorField)) {
           throw BadRequestProblem(
             ProblemMessageData().message(
@@ -536,7 +429,7 @@ object AirbyteCatalogHelper {
         if (!validPrimaryKey.contains(singlePrimaryKey)) { // todo double check if the .contains() for list of strings works as intended
           throw BadRequestProblem(
             ProblemMessageData().message(
-              "Invalid cursor field for stream: ${airbyteStream.name}. The list of valid primary keys fields: $validPrimaryKey.",
+              "Invalid primary key for stream: ${airbyteStream.name}. The list of valid primary keys fields: $validPrimaryKey.",
             ),
           )
         }
@@ -580,44 +473,13 @@ object AirbyteCatalogHelper {
   }
 
   /**
-   * Parses a connectorSchema to retrieve top level fields only, ignoring the nested fields.
-   *
-   * @param connectorSchema source or destination schema
-   * @return A list of top level fields, ignoring the nested fields.
-   */
-  @VisibleForTesting
-  private fun getStreamTopLevelFields(connectorSchema: JsonNode): List<String> {
-    val yamlMapper = ObjectMapper(YAMLFactory())
-    val streamFields: MutableList<String> = ArrayList()
-    val spec: JsonNode =
-      try {
-        yamlMapper.readTree(connectorSchema.traverse())
-      } catch (e: IOException) {
-        log.error(e) { "Error getting stream fields from schema" }
-        throw UnexpectedProblem()
-      }
-    val fields = spec.fields()
-    while (fields.hasNext()) {
-      val (key, paths) = fields.next()
-      if ("properties" == key) {
-        val propertyFields = paths.fields()
-        while (propertyFields.hasNext()) {
-          val (propertyName, _) = propertyFields.next()
-          streamFields.add(propertyName)
-        }
-      }
-    }
-    return streamFields.toList()
-  }
-
-  /**
    * Parses a connectorSchema to retrieve all the possible stream fields.
    *
    * @param connectorSchema source or destination schema
    * @return A list of stream fields, which are represented as list of strings since they can be
    * nested fields.
    */
-  fun getStreamFields(connectorSchema: JsonNode): List<List<String>> {
+  private fun getStreamFields(connectorSchema: JsonNode): List<List<String>> {
     val yamlMapper = ObjectMapper(YAMLFactory())
     val streamFields: MutableList<List<String>> = ArrayList()
     val spec: JsonNode =
@@ -649,5 +511,196 @@ object AirbyteCatalogHelper {
       }
     }
     return streamFields.toList()
+  }
+
+  /**
+   * Converts an StreamConfiguration from a user to an object ready to pass into a configured catalog.
+   *
+   * @param sourceStreamAndConfiguration source schema stream and configuration
+   * @param streamConfiguration The user's passed-in stream config
+   */
+  private fun toAirbyteStreamConfiguration(
+    sourceStreamAndConfiguration: AirbyteStreamAndConfiguration,
+    streamConfiguration: StreamConfiguration,
+  ): AirbyteStreamConfiguration {
+    val sourceSchemaStreamConfiguration = sourceStreamAndConfiguration.config
+    val sourceSchemaStream = sourceStreamAndConfiguration.stream
+    return AirbyteStreamConfiguration().apply {
+      // Set stream config as selected
+      selected = true
+      aliasName = sourceSchemaStreamConfiguration.aliasName
+      fieldSelectionEnabled = sourceSchemaStreamConfiguration.fieldSelectionEnabled
+      selectedFields = sourceSchemaStreamConfiguration.selectedFields
+
+      includeFiles = sourceSchemaStreamConfiguration.includeFiles
+      if (streamConfiguration.includeFiles != null) {
+        includeFiles = streamConfiguration.includeFiles
+      }
+
+      if (streamConfiguration.selectedFields != null) {
+        // Override and update
+        fieldSelectionEnabled = true
+        selectedFields = streamConfiguration.selectedFields?.map { selectedFieldInfoConverter(it) }
+      }
+      suggested = sourceSchemaStreamConfiguration.suggested
+
+      // Set namespace from StreamConfiguration if provided, otherwise keep existing value
+      namespace = sourceSchemaStreamConfiguration.namespace
+      if (streamConfiguration.namespace != null) {
+        namespace = streamConfiguration.namespace
+      }
+
+      destinationObjectName = streamConfiguration.destinationObjectName ?: sourceSchemaStreamConfiguration.destinationObjectName
+
+      mappers = sourceSchemaStreamConfiguration.mappers
+      if (streamConfiguration.mappers != null) {
+        mappers = streamConfiguration.mappers!!.map { configuredMapperConverter(it) }
+      }
+
+      if (streamConfiguration.syncMode == null) {
+        syncMode = SyncMode.FULL_REFRESH
+        destinationSyncMode = DestinationSyncMode.OVERWRITE
+        cursorField = sourceSchemaStreamConfiguration.cursorField
+        primaryKey = sourceSchemaStreamConfiguration.primaryKey
+      } else {
+        when (streamConfiguration.syncMode) {
+          ConnectionSyncModeEnum.FULL_REFRESH_APPEND -> {
+            syncMode = SyncMode.FULL_REFRESH
+            destinationSyncMode = DestinationSyncMode.APPEND
+            cursorField = sourceSchemaStreamConfiguration.cursorField
+            primaryKey = sourceSchemaStreamConfiguration.primaryKey
+          }
+
+          ConnectionSyncModeEnum.FULL_REFRESH_OVERWRITE_DEDUPED -> {
+            syncMode = SyncMode.FULL_REFRESH
+            destinationSyncMode = DestinationSyncMode.OVERWRITE_DEDUP
+            cursorField = sourceSchemaStreamConfiguration.cursorField
+            primaryKey = selectPrimaryKey(sourceSchemaStream, streamConfiguration)
+          }
+
+          ConnectionSyncModeEnum.INCREMENTAL_APPEND -> {
+            syncMode(SyncMode.INCREMENTAL)
+            destinationSyncMode(DestinationSyncMode.APPEND)
+            cursorField(selectCursorField(sourceSchemaStream, streamConfiguration))
+            primaryKey(selectPrimaryKey(sourceSchemaStream, streamConfiguration))
+          }
+
+          ConnectionSyncModeEnum.INCREMENTAL_DEDUPED_HISTORY -> {
+            syncMode = SyncMode.INCREMENTAL
+            destinationSyncMode = DestinationSyncMode.APPEND_DEDUP
+            cursorField = selectCursorField(sourceSchemaStream, streamConfiguration)
+            primaryKey = selectPrimaryKey(sourceSchemaStream, streamConfiguration)
+          }
+
+          ConnectionSyncModeEnum.INCREMENTAL_UPDATE -> {
+            syncMode = SyncMode.INCREMENTAL
+            destinationSyncMode = DestinationSyncMode.UPDATE
+            cursorField = selectCursorField(sourceSchemaStream, streamConfiguration)
+            primaryKey = selectPrimaryKey(sourceSchemaStream, streamConfiguration)
+          }
+
+          ConnectionSyncModeEnum.FULL_REFRESH_UPDATE -> {
+            syncMode = SyncMode.FULL_REFRESH
+            destinationSyncMode = DestinationSyncMode.UPDATE
+            cursorField = sourceSchemaStreamConfiguration.cursorField
+            primaryKey = selectPrimaryKey(sourceSchemaStream, streamConfiguration)
+          }
+
+          ConnectionSyncModeEnum.INCREMENTAL_SOFT_DELETE -> {
+            syncMode = SyncMode.INCREMENTAL
+            destinationSyncMode = DestinationSyncMode.SOFT_DELETE
+            cursorField = selectCursorField(sourceSchemaStream, streamConfiguration)
+            primaryKey = selectPrimaryKey(sourceSchemaStream, streamConfiguration)
+          }
+
+          ConnectionSyncModeEnum.FULL_REFRESH_SOFT_DELETE -> {
+            syncMode = SyncMode.FULL_REFRESH
+            destinationSyncMode = DestinationSyncMode.SOFT_DELETE
+            cursorField = sourceSchemaStreamConfiguration.cursorField
+            primaryKey = selectPrimaryKey(sourceSchemaStream, streamConfiguration)
+          }
+
+          else -> {
+            syncMode = SyncMode.FULL_REFRESH
+            destinationSyncMode = DestinationSyncMode.OVERWRITE
+            cursorField = sourceSchemaStreamConfiguration.cursorField
+            primaryKey = sourceSchemaStreamConfiguration.primaryKey
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * @param referenceCatalog the catalog we got from discoverSourceSchema
+   * @param streamConfigurations the stream configurations passed in by the user
+   */
+  fun getValidConfiguredStreams(
+    referenceCatalog: AirbyteCatalog,
+    streamConfigurations: StreamConfigurations,
+    validDestinationSyncModes: List<DestinationSyncMode>,
+  ): List<AirbyteStreamAndConfiguration> {
+    val alreadyConfiguredStreams = mutableSetOf<Pair<String, String?>>()
+
+    return streamConfigurations.streams.orEmpty().map {
+      val referenceStreamAndConfig = findAndValidateCatalogStreamAndConfiguration(referenceCatalog, it.name, it.namespace)
+      validateStreamConfig(it, validDestinationSyncModes, referenceStreamAndConfig.stream)
+      // For each of our configurations, attempt to map it to a valid configured stream that we can pass to the internal handlers.
+      val mappedConfig = toAirbyteStreamConfiguration(referenceStreamAndConfig, it)
+      val configuredStreamAndConfig =
+        AirbyteStreamAndConfiguration().apply {
+          this.stream = referenceStreamAndConfig.stream
+          this.config = mappedConfig
+        }
+      if (!alreadyConfiguredStreams.add(Pair(it.name, it.namespace))) {
+        throw BadRequestProblem(
+          ProblemMessageData()
+            .message("Duplicate stream found in configuration for stream name [${it.name}] in namespace [${it.namespace}]."),
+        )
+      }
+      return@map configuredStreamAndConfig
+    }
+  }
+
+  /**
+   * Find the reference catalog stream that matches the incoming stream/namespace.
+   * Validation now happens here - if we hit an error condition, we'll throw a problem.
+   */
+  private fun findAndValidateCatalogStreamAndConfiguration(
+    referenceCatalog: AirbyteCatalog,
+    streamName: String,
+    streamNamespace: String?,
+  ): AirbyteStreamAndConfiguration {
+    // First try to find the stream by name
+    val streamNameMatches = referenceCatalog.streams.filter { it.stream.name == streamName }
+    // If we have just one match, return it
+    if (streamNameMatches.size == 1) {
+      return streamNameMatches.first()
+    }
+
+    // If we have multiple streams,
+    // check if we have any matches with stream name && namespace
+    // If we have one, return it
+    // If we have multiple, throw a BadRequestProblem
+    // If we have none, throw a BadRequestProblem
+    val streamAndConfigs = streamNameMatches.filter { it.stream.namespace == streamNamespace }
+    if (streamAndConfigs.size == 1) {
+      return streamAndConfigs.first()
+    } else if (streamAndConfigs.size > 1) {
+      throw BadRequestProblem(
+        ProblemMessageData()
+          .message(
+            "Multiple streams found with name [$streamName] and namespace [$streamNamespace]. Please call the https://reference.airbyte.com/reference/getstreamproperties endpoint to see the valid stream name and namespace combinations.",
+          ),
+      )
+    } else {
+      // If we have no matches with stream name && namespace, throw a BadRequestProblem
+      throw BadRequestProblem(
+        ProblemMessageData()
+          .message(
+            "No streams found with name [$streamName] and namespace [$streamNamespace]. Please call the https://reference.airbyte.com/reference/getstreamproperties endpoint to see the valid stream name and namespace combinations.",
+          ),
+      )
+    }
   }
 }

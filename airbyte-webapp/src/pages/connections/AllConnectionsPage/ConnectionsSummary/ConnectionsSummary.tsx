@@ -1,21 +1,20 @@
 import React from "react";
 import { FormattedMessage } from "react-intl";
 
+import { LoadingSkeleton } from "components/ui/LoadingSkeleton";
 import { Text } from "components/ui/Text";
 
-import { useConnectionList } from "core/api";
-import { JobStatus, WebBackendConnectionListItem } from "core/api/types/AirbyteClient";
+import { useGetConnectionStatusesCounts } from "core/api";
+import {
+  ConnectionStatusRead,
+  ConnectionSyncStatus,
+  JobStatus,
+  WebBackendConnectionListItem,
+} from "core/api/types/AirbyteClient";
 
 import styles from "./ConnectionsSummary.module.scss";
 
-export type SummaryKey = "healthy" | "failed" | "paused" | "running";
-
-export const connectionStatColors: Record<SummaryKey, React.ComponentPropsWithoutRef<typeof Text>["color"]> = {
-  healthy: "green600",
-  failed: "red",
-  paused: "grey",
-  running: "blue",
-};
+export type SummaryKey = "healthy" | "failed" | "paused" | "running" | "notSynced";
 
 export const isConnectionEnabled = (
   connection: WebBackendConnectionListItem
@@ -36,56 +35,91 @@ export const isConnectionFailed = (
   connection.latestSyncJobStatus === JobStatus.cancelled ||
   connection.latestSyncJobStatus === JobStatus.incomplete;
 
+export const isStatusEnabled = (
+  connectionStatus?: ConnectionStatusRead
+): connectionStatus is ConnectionStatusRead & {
+  status: Omit<ConnectionSyncStatus, typeof ConnectionSyncStatus.paused>;
+} => connectionStatus?.connectionSyncStatus !== ConnectionSyncStatus.paused;
+
+export const isStatusPaused = (
+  connectionStatus?: ConnectionStatusRead
+): connectionStatus is ConnectionStatusRead & { status: typeof ConnectionSyncStatus.paused } =>
+  connectionStatus?.connectionSyncStatus === ConnectionSyncStatus.paused;
+
+export const isStatusRunning = (
+  connectionStatus?: ConnectionStatusRead
+): connectionStatus is ConnectionStatusRead & { status: typeof ConnectionSyncStatus.running } =>
+  connectionStatus?.connectionSyncStatus === ConnectionSyncStatus.running;
+
+export const isStatusFailed = (
+  connectionStatus?: ConnectionStatusRead
+): connectionStatus is ConnectionStatusRead & {
+  status: typeof ConnectionSyncStatus.failed | typeof ConnectionSyncStatus.incomplete;
+} =>
+  connectionStatus?.connectionSyncStatus === ConnectionSyncStatus.failed ||
+  connectionStatus?.connectionSyncStatus === ConnectionSyncStatus.incomplete;
+
 export const ConnectionsSummary: React.FC = () => {
-  const connections = useConnectionList()?.connections ?? [];
+  const { isLoading, data: statuses } = useGetConnectionStatusesCounts();
 
-  const connectionsSummary = connections.reduce<Record<SummaryKey, number>>(
-    (acc, connection) => {
-      let status: SummaryKey;
-
-      if (isConnectionPaused(connection)) {
-        status = "paused";
-      } else if (isConnectionRunning(connection)) {
-        status = "running";
-      } else if (isConnectionFailed(connection)) {
-        status = "failed";
-      } else {
-        status = "healthy";
-      }
-
-      acc[status] += 1;
-      return acc;
-    },
-    {
-      // order here governs render order
-      running: 0,
-      healthy: 0,
-      failed: 0,
-      paused: 0,
-    }
-  );
-
-  const keys = Object.keys(connectionsSummary) as SummaryKey[];
-  const parts: React.ReactNode[] = [];
-  const connectionsCount = keys.reduce((total, value) => total + connectionsSummary[value], 0);
-  let consumedConnections = 0;
-
-  for (const key of keys) {
-    const value = connectionsSummary[key];
-    if (value) {
-      consumedConnections += value;
-      parts.push(
-        <Text key={key} as="span" size="lg" color={connectionStatColors[key]} className={styles.lowercase}>
-          {value} <FormattedMessage id={`tables.connections.filters.status.${key}`} />
-        </Text>,
-        consumedConnections < connectionsCount && (
-          <Text key={`${key}-middot`} as="span" size="lg" bold color="grey">
-            &nbsp;&middot;&nbsp;
-          </Text>
-        )
-      );
-    }
+  if (isLoading || !statuses) {
+    return <LoadingSkeleton className={styles.fixedHeight} />;
   }
 
-  return <>{parts}</>;
+  const statusItems: Array<{
+    key: SummaryKey;
+    count: number;
+    color: React.ComponentProps<typeof Text>["color"];
+    labelId: string;
+  }> = [
+    {
+      key: "running",
+      count: statuses.running,
+      color: "blue",
+      labelId: "tables.connections.filters.status.running",
+    } as const,
+    {
+      key: "healthy",
+      count: statuses.healthy,
+      color: "green600",
+      labelId: "tables.connections.filters.status.healthy",
+    } as const,
+    {
+      key: "failed",
+      count: statuses.failed,
+      color: "red",
+      labelId: "tables.connections.filters.status.failed",
+    } as const,
+    {
+      key: "paused",
+      count: statuses.paused,
+      color: "grey",
+      labelId: "tables.connections.filters.status.paused",
+    } as const,
+    {
+      key: "notSynced",
+      count: statuses.notSynced,
+      color: "grey300",
+      labelId: "tables.connections.filters.status.notSynced",
+    } as const,
+  ].filter((item) => item.count > 0);
+
+  return (
+    <div className={styles.fixedHeight}>
+      {statusItems.map((item, index) => (
+        <React.Fragment key={item.key}>
+          <Text as="span" size="lg" color={item.color} className={styles.lowercase}>
+            {item.count} <FormattedMessage id={item.labelId} />
+          </Text>
+          {index < statusItems.length - 1 && <SeparatorDot />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
 };
+
+const SeparatorDot = () => (
+  <Text as="span" size="lg" bold color="grey">
+    &nbsp;&middot;&nbsp;
+  </Text>
+);

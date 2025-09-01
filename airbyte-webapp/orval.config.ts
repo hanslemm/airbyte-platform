@@ -204,11 +204,11 @@ export default defineConfig({
     // Required to exclude, due to us not being able to convert JSON parameters
     "/public/v1/oauth/callback",
   ]),
-  cloudApi: createApi("../airbyte-api/commons/src/main/openapi/cloud-config.yaml", "CloudApi", "cloudApiCall"),
-  connectorBuilder: createApi(
-    "../airbyte-connector-builder-server/src/main/openapi/openapi.yaml",
-    "ConnectorBuilderClient",
-    "connectorBuilderApiCall"
+  sonarApi: createApi(
+    // todo: this should be an env variable probably, not a raw hardcoded url
+    "https://airbyte-sonar-prod.s3.us-east-2.amazonaws.com/openapi/2025-07-28T19-28-14Z/8c390988/app.json",
+    "SonarClient",
+    "sonarApiCall"
   ),
   connectorManifest: createApi("./src/services/connectorBuilder/connector_manifest_openapi.yaml", "ConnectorManifest"),
   apiErrorTypes: errorTypeGeneration("../airbyte-api/problems-api/src/main/openapi/api-problems.yaml"),

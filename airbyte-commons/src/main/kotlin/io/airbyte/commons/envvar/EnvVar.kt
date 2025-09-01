@@ -12,9 +12,10 @@ package io.airbyte.commons.envvar
  * These are defined in alphabetical order for findability/readability reasons.
  */
 enum class EnvVar {
-  AIRBYTE_ALLOW_CUSTOM_CODE,
   AIRBYTE_EDITION,
+  AIRBYTE_ENABLE_UNSAFE_CODE,
   AIRBYTE_ROLE,
+  AIRBYTE_URL,
   AIRBYTE_VERSION,
   ATTEMPT_ID,
   AWS_ACCESS_KEY_ID,
@@ -101,6 +102,7 @@ enum class EnvVar {
    */
   STORAGE_BUCKET_AUDIT_LOGGING,
   STORAGE_BUCKET_LOG,
+  STORAGE_BUCKET_REPLICATION_DUMP,
   STORAGE_BUCKET_STATE,
   STORAGE_BUCKET_WORKLOAD_OUTPUT,
   STORAGE_TYPE,

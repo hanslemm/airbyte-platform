@@ -1,7 +1,7 @@
-import classNames from "classnames";
 import { useMemo, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 
+import { Button } from "components/ui/Button";
 import { Heading } from "components/ui/Heading";
 import { Icon } from "components/ui/Icon";
 import { Link } from "components/ui/Link";
@@ -11,8 +11,7 @@ import { Tooltip } from "components/ui/Tooltip";
 import { ConnectorIds, SvgIcon } from "area/connector/utils";
 import { useCurrentWorkspace, useSourceDefinitionList, useDestinationDefinitionList } from "core/api";
 import { DestinationDefinitionRead, SourceDefinitionRead } from "core/api/types/AirbyteClient";
-import { links } from "core/utils/links";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 import { useExperiment } from "hooks/services/Experiment";
 import { ConnectionRoutePaths, DestinationPaths, RoutePaths } from "pages/routePaths";
 
@@ -79,7 +78,7 @@ export const ConnectionOnboarding: React.FC<ConnectionOnboardingProps> = () => {
   const { formatMessage } = useIntl();
   const { workspaceId } = useCurrentWorkspace();
   const { sourceDefinitions, destinationDefinitions } = useConnectorSpecificationMap();
-  const canCreateConnection = useIntent("CreateConnection", { workspaceId });
+  const canCreateConnection = useGeneratedIntent(Intent.CreateOrEditConnection);
 
   const [highlightedSource, setHighlightedSource] = useState<HighlightIndex>(1);
   const [highlightedDestination, setHighlightedDestination] = useState<HighlightIndex>(0);
@@ -148,7 +147,6 @@ export const ConnectionOnboarding: React.FC<ConnectionOnboardingProps> = () => {
                 key={source?.sourceDefinitionId}
                 testId={`onboardingSource-${index}`}
                 connector={source}
-                connectorType="source"
                 to={createSourcePath(source?.sourceDefinitionId)}
                 tooltipText={tooltipText}
                 onMouseEnter={() => setHighlightedSource(index as HighlightIndex)}
@@ -205,7 +203,6 @@ export const ConnectionOnboarding: React.FC<ConnectionOnboardingProps> = () => {
                 key={destination?.destinationDefinitionId}
                 testId={`onboardingDestination-${index}`}
                 connector={destination}
-                connectorType="destination"
                 to={`${createDestinationBasePath}/${destination.destinationDefinitionId}`}
                 tooltipText={tooltipText}
                 onMouseEnter={() => setHighlightedDestination(index as HighlightIndex)}
@@ -228,30 +225,11 @@ export const ConnectionOnboarding: React.FC<ConnectionOnboardingProps> = () => {
         </div>
       </div>
       <div className={styles.footer}>
-        <Link
-          to={createConnectionPath}
-          data-testid="new-connection-button"
-          className={classNames(
-            styles.button,
-            styles.typePrimary,
-            styles.sizeL,
-            styles.linkText,
-            !canCreateConnection && styles.disabled
-          )}
-        >
-          <FormattedMessage id="connection.onboarding.createFirst" />
+        <Link to={canCreateConnection ? createConnectionPath : "#"} data-testid="new-connection-button">
+          <Button variant="primary" disabled={!canCreateConnection}>
+            <FormattedMessage id="connection.onboarding.createFirst" />
+          </Button>
         </Link>
-        <FormattedMessage
-          tagName="span"
-          id="connection.onboarding.demoInstance"
-          values={{
-            demoLnk: (children: React.ReactNode) => (
-              <a href={links.demoLink} target="_blank" rel="noreferrer noopener" className={styles.demoLink}>
-                {children}
-              </a>
-            ),
-          }}
-        />
       </div>
     </div>
   );

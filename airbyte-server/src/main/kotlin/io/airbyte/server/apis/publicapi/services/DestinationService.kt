@@ -23,12 +23,13 @@ import io.airbyte.publicApi.server.generated.models.DestinationResponse
 import io.airbyte.publicApi.server.generated.models.DestinationsResponse
 import io.airbyte.server.apis.publicapi.constants.HTTP_RESPONSE_BODY_DEBUG_MESSAGE
 import io.airbyte.server.apis.publicapi.errorHandlers.ConfigClientErrorHandler
+import io.airbyte.server.apis.publicapi.helpers.toInternal
 import io.airbyte.server.apis.publicapi.mappers.DestinationReadMapper
 import io.airbyte.server.apis.publicapi.mappers.DestinationsResponseMapper
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micronaut.context.annotation.Secondary
 import io.micronaut.context.annotation.Value
 import jakarta.inject.Singleton
-import org.slf4j.LoggerFactory
 import java.util.UUID
 
 interface DestinationService {
@@ -37,7 +38,10 @@ interface DestinationService {
     destinationDefinitionId: UUID,
   ): DestinationResponse
 
-  fun getDestination(destinationId: UUID): DestinationResponse
+  fun getDestination(
+    destinationId: UUID,
+    includeSecretCoordinates: Boolean?,
+  ): DestinationResponse
 
   fun updateDestination(
     destinationId: UUID,
@@ -65,6 +69,8 @@ interface DestinationService {
   fun getDestinationSyncModes(destinationRead: DestinationRead): List<DestinationSyncMode>
 }
 
+private val log = KotlinLogging.logger {}
+
 @Singleton
 @Secondary
 class DestinationServiceImpl(
@@ -73,10 +79,6 @@ class DestinationServiceImpl(
   private val connectorDefinitionSpecificationHandler: ConnectorDefinitionSpecificationHandler,
   private val currentUserService: CurrentUserService,
 ) : DestinationService {
-  companion object {
-    private val log = LoggerFactory.getLogger(DestinationServiceImpl::class.java)
-  }
-
   @Value("\${airbyte.api.host}")
   var publicApiHost: String? = null
 
@@ -92,17 +94,18 @@ class DestinationServiceImpl(
     destinationCreateOss.destinationDefinitionId = destinationDefinitionId
     destinationCreateOss.workspaceId = destinationCreateRequest.workspaceId
     destinationCreateOss.connectionConfiguration = destinationCreateRequest.configuration
+    destinationCreateOss.resourceAllocation = destinationCreateRequest.resourceAllocation?.toInternal()
 
     val result =
       kotlin
         .runCatching {
           destinationHandler.createDestination(destinationCreateOss)
         }.onFailure {
-          log.error("Error while listing connections for workspaces: ", it)
+          log.error(it) { "Error while listing connections for workspaces" }
           ConfigClientErrorHandler.handleError(it)
         }
 
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     val destinationRead = result.getOrNull()!!
     return DestinationReadMapper.from(destinationRead)
   }
@@ -110,20 +113,23 @@ class DestinationServiceImpl(
   /**
    * Gets a destination by ID.
    */
-  override fun getDestination(destinationId: UUID): DestinationResponse {
+  override fun getDestination(
+    destinationId: UUID,
+    includeSecretCoordinates: Boolean?,
+  ): DestinationResponse {
     val destinationIdRequestBody = DestinationIdRequestBody()
     destinationIdRequestBody.destinationId = destinationId
 
     val result =
       kotlin
         .runCatching {
-          destinationHandler.getDestination(destinationIdRequestBody)
+          destinationHandler.getDestination(destinationIdRequestBody, includeSecretCoordinates == true)
         }.onFailure {
-          log.error("Error while getting destination: ", it)
+          log.error(it) { "Error while getting destination" }
           ConfigClientErrorHandler.handleError(it)
         }
 
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     val destinationRead = result.getOrNull()!!
     return DestinationReadMapper.from(destinationRead)
   }
@@ -136,15 +142,14 @@ class DestinationServiceImpl(
     destinationIdRequestBody.destinationId = destinationId
 
     val result =
-      kotlin
-        .runCatching {
-          destinationHandler.getDestination(destinationIdRequestBody)
-        }.onFailure {
-          log.error("Error while getting destination: ", it)
-          ConfigClientErrorHandler.handleError(it)
-        }
+      runCatching {
+        destinationHandler.getDestination(destinationIdRequestBody)
+      }.onFailure {
+        log.error(it) { "Error while getting destination" }
+        ConfigClientErrorHandler.handleError(it)
+      }
 
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     val destinationRead = result.getOrThrow()
     return destinationRead
   }
@@ -161,16 +166,17 @@ class DestinationServiceImpl(
         .destinationId(destinationId)
         .connectionConfiguration(destinationPutRequest.configuration)
         .name(destinationPutRequest.name)
+        .resourceAllocation(destinationPutRequest.resourceAllocation?.toInternal())
 
     val result =
       kotlin
         .runCatching {
           destinationHandler.updateDestination(destinationUpdate)
         }.onFailure {
-          log.error("Error while listing connections for workspaces: ", it)
+          log.error(it) { "Error while listing connections for workspaces" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     val destinationRead = result.getOrNull()!!
     return DestinationReadMapper.from(destinationRead)
   }
@@ -187,16 +193,17 @@ class DestinationServiceImpl(
         .destinationId(destinationId)
         .connectionConfiguration(destinationPatchRequest.configuration)
         .name(destinationPatchRequest.name)
+        .resourceAllocation(destinationPatchRequest.resourceAllocation?.toInternal())
 
     val result =
       kotlin
         .runCatching {
           destinationHandler.partialDestinationUpdate(partialDestinationUpdate)
         }.onFailure {
-          log.error("Error while listing connections for workspaces: ", it)
+          log.error(it) { "Error while listing connections for workspaces" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     val destinationRead = result.getOrNull()!!
     return DestinationReadMapper.from(destinationRead)
   }
@@ -211,10 +218,10 @@ class DestinationServiceImpl(
         .runCatching {
           destinationHandler.deleteDestination(destinationIdRequestBody)
         }.onFailure {
-          log.error("Error while listing connections for workspaces: ", it)
+          log.error(it) { "Error while listing connections for workspaces" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
   }
 
   /**
@@ -227,21 +234,20 @@ class DestinationServiceImpl(
     offset: Int,
   ): DestinationsResponse {
     val pagination: Pagination = Pagination().pageSize(limit).rowOffset(offset)
-    val workspaceIdsToQuery = workspaceIds.ifEmpty { userService.getAllWorkspaceIdsForUser(currentUserService.currentUser.userId) }
+    val workspaceIdsToQuery = workspaceIds.ifEmpty { userService.getAllWorkspaceIdsForUser(currentUserService.getCurrentUser().userId) }
     val listResourcesForWorkspacesRequestBody = ListResourcesForWorkspacesRequestBody()
     listResourcesForWorkspacesRequestBody.includeDeleted = includeDeleted
     listResourcesForWorkspacesRequestBody.pagination = pagination
     listResourcesForWorkspacesRequestBody.workspaceIds = workspaceIdsToQuery
 
     val result =
-      kotlin
-        .runCatching {
-          destinationHandler.listDestinationsForWorkspaces(listResourcesForWorkspacesRequestBody)
-        }.onFailure {
-          log.error("Error while listing destinations for workspaces: ", it)
-          ConfigClientErrorHandler.handleError(it)
-        }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+      runCatching {
+        destinationHandler.listDestinationsForWorkspaces(listResourcesForWorkspacesRequestBody)
+      }.onFailure {
+        log.error(it) { "Error while listing destinations for workspaces" }
+        ConfigClientErrorHandler.handleError(it)
+      }
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     return DestinationsResponseMapper.from(
       result.getOrNull()!!,
       workspaceIds,
@@ -268,7 +274,7 @@ class DestinationServiceImpl(
         .runCatching {
           connectorDefinitionSpecificationHandler.getDestinationSpecification(destinationDefinitionIdWithWorkspaceId)
         }.onFailure {
-          log.error("Error while listing destinations for workspaces: ", it)
+          log.error(it) { "Error while listing destinations for workspaces" }
           ConfigClientErrorHandler.handleError(it)
         }
 

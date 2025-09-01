@@ -1,4 +1,4 @@
-import { config } from "core/config";
+import { PostHog } from "posthog-js";
 
 import { HockeyStackAnalyticsObject } from "./HockeyStackAnalytics";
 import { Action, EventParams, Namespace } from "./types";
@@ -12,11 +12,17 @@ export class AnalyticsService {
 
   private getHockeyStackAnalytics = (): HockeyStackAnalyticsObject | undefined => window.HockeyStack;
 
+  private getPosthogAnalytics = (): PostHog | undefined => window.posthog;
+
   public setContext(context: Context) {
     this.context = {
       ...this.context,
       ...context,
     };
+  }
+
+  public hasContext(key: string): boolean {
+    return this.context[key] !== undefined;
   }
 
   public removeFromContext(...keys: string[]) {
@@ -31,7 +37,14 @@ export class AnalyticsService {
     if (process.env.NODE_ENV === "development") {
       console.debug(`%c[Analytics.Page] ${name}`, "color: teal", params);
     }
-    this.getSegmentAnalytics()?.page?.(name, { ...params, ...this.context });
+
+    const session_id = this.getPosthogAnalytics()?.get_session_id();
+
+    this.getSegmentAnalytics()?.page?.(name, {
+      ...params,
+      ...this.context,
+      ...(session_id && { $session_id: session_id }),
+    });
   }
 
   public reset(): void {
@@ -42,11 +55,12 @@ export class AnalyticsService {
     if (process.env.NODE_ENV === "development") {
       console.debug(`%c[Analytics.Track] Airbyte.UI.${namespace}.${action}`, "color: teal", params);
     }
+    const session_id = this.getPosthogAnalytics()?.get_session_id();
+
     this.getSegmentAnalytics()?.track(`Airbyte.UI.${namespace}.${action}`, {
       ...params,
       ...this.context,
-      airbyte_version: config.version,
-      environment: config.version === "dev" ? "dev" : "prod",
+      ...(session_id && { $session_id: session_id }),
     });
   }
 
@@ -55,6 +69,11 @@ export class AnalyticsService {
       console.debug(`%c[Analytics.Identify] ${userId}`, "color: teal", traits);
     }
     this.getSegmentAnalytics()?.identify?.(userId, traits);
+    // PostHog identify and alias to link anonymous history
+    const posthog = this.getPosthogAnalytics();
+    if (posthog) {
+      posthog.identify(userId, traits);
+    }
 
     // HockeyStack supports string, boolean and number custom properties
     // https://docs.hockeystack.com/advanced-strategies-and-techniques/advanced-features/identifying-users

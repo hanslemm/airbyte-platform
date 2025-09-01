@@ -1,5 +1,6 @@
 @use "scss/variables";
 @use "scss/colors";
+@use "scss/z-indices";
 
 .optionsMenu {
   width: var(--input-width); // match the combobox button's width, see https://headlessui.com/react/combobox
@@ -13,10 +14,11 @@
   min-width: variables.$min-width-listbox-options-list;
   list-style-type: none;
   overflow-y: auto;
+  z-index: z-indices.$overlay;
 }
 
 .optionValue {
-  padding: variables.$spacing-md variables.$spacing-lg;
+  padding: variables.$spacing-md;
   cursor: pointer;
   word-break: break-all;
 }
@@ -54,5 +56,5 @@
   border: none;
   cursor: pointer;
   color: colors.$grey-300;
-  padding-inline: 8px;
+  padding-inline: variables.$spacing-md;
 }

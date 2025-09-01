@@ -4,14 +4,10 @@
 
 package io.airbyte.workload.launcher.client
 
-import io.airbyte.config.WorkloadType
-import io.airbyte.workload.api.client.generated.WorkloadApi
-import io.airbyte.workload.api.client.model.generated.ClaimResponse
-import io.airbyte.workload.api.client.model.generated.WorkloadFailureRequest
-import io.airbyte.workload.launcher.pipeline.consumer.LauncherInput
-import io.airbyte.workload.launcher.pipeline.stages.StageName
-import io.airbyte.workload.launcher.pipeline.stages.model.StageError
-import io.airbyte.workload.launcher.pipeline.stages.model.StageIO
+import io.airbyte.api.client.ApiException
+import io.airbyte.workload.api.domain.ClaimResponse
+import io.airbyte.workload.api.domain.WorkloadFailureRequest
+import io.airbyte.workload.launcher.authn.DataplaneIdentityService
 import io.micronaut.http.HttpStatus
 import io.mockk.every
 import io.mockk.mockk
@@ -20,76 +16,33 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.openapitools.client.infrastructure.ClientException
-import java.util.UUID
 
 private const val APPLICATION_NAME = "airbyte-workload-launcher"
-private const val DATA_PLANE_ID = "data-plane-id"
 
 internal class WorkloadApiClientTest {
+  private lateinit var identifyService: DataplaneIdentityService
   private lateinit var workloadApiClient: WorkloadApiClient
-  private lateinit var workloadApi: WorkloadApi
   private lateinit var internalWorkloadApiClient: io.airbyte.workload.api.client.WorkloadApiClient
 
   @BeforeEach
   internal fun setup() {
-    workloadApi = mockk()
     internalWorkloadApiClient = mockk()
-    workloadApiClient = WorkloadApiClient(internalWorkloadApiClient, DATA_PLANE_ID, APPLICATION_NAME)
-
-    every { internalWorkloadApiClient.workloadApi } returns workloadApi
+    identifyService = mockk(relaxed = true)
+    workloadApiClient = WorkloadApiClient(internalWorkloadApiClient, identifyService, APPLICATION_NAME)
   }
 
   @Test
   internal fun `test reporting a failure to the workload API`() {
     val workloadId = "workload-id"
-    val launcherInput =
-      LauncherInput(
-        workloadId = workloadId,
-        workloadInput = "",
-        labels = mapOf(),
-        logPath = "",
-        workloadType = WorkloadType.SYNC,
-        mutexKey = "",
-        autoId = UUID.randomUUID(),
-      )
-    val stageIo: StageIO = mockk()
     val requestCapture = slot<WorkloadFailureRequest>()
 
-    every { workloadApi.workloadFailure(any()) } returns Unit
-    every { stageIo.msg } returns launcherInput
-    val failure = StageError(stageIo, StageName.LAUNCH, RuntimeException("Cause"))
+    every { internalWorkloadApiClient.workloadFailure(any()) } returns Unit
+    val failure = RuntimeException("Cause")
 
-    workloadApiClient.reportFailure(failure)
+    workloadApiClient.reportFailure(workloadId, failure)
 
-    verify(exactly = 1) { workloadApi.workloadFailure(capture(requestCapture)) }
+    verify(exactly = 1) { internalWorkloadApiClient.workloadFailure(capture(requestCapture)) }
     assertEquals(workloadId, requestCapture.captured.workloadId)
-  }
-
-  @Test
-  internal fun `test that a failure is not reported to the Workload API for the claim stage`() {
-    val workloadId = "workload-id"
-    val launcherInput =
-      LauncherInput(
-        workloadId = workloadId,
-        workloadInput = "",
-        labels = mapOf(),
-        logPath = "",
-        workloadType = WorkloadType.SYNC,
-        mutexKey = "",
-        autoId = UUID.randomUUID(),
-      )
-    val stageIo: StageIO = mockk()
-    val failure: StageError = mockk()
-
-    every { workloadApi.workloadFailure(any()) } returns Unit
-    every { stageIo.msg } returns launcherInput
-    every { failure.stageName } returns StageName.CLAIM
-    every { failure.io } returns stageIo
-
-    workloadApiClient.reportFailure(failure)
-
-    verify(exactly = 0) { workloadApi.workloadFailure(any()) }
   }
 
   @Test
@@ -97,11 +50,11 @@ internal class WorkloadApiClientTest {
     val workloadId = "workload-id"
     val requestCapture = slot<WorkloadFailureRequest>()
 
-    every { workloadApi.workloadFailure(any()) } returns Unit
+    every { internalWorkloadApiClient.workloadFailure(any()) } returns Unit
 
     workloadApiClient.updateStatusToFailed(workloadId, "Cause")
 
-    verify(exactly = 1) { workloadApi.workloadFailure(capture(requestCapture)) }
+    verify(exactly = 1) { internalWorkloadApiClient.workloadFailure(capture(requestCapture)) }
     assertEquals(workloadId, requestCapture.captured.workloadId)
   }
 
@@ -111,11 +64,11 @@ internal class WorkloadApiClientTest {
     val response: ClaimResponse = mockk()
 
     every { response.claimed } returns true
-    every { workloadApi.workloadClaim(any()) } returns response
+    every { internalWorkloadApiClient.workloadClaim(any()) } returns response
 
     val claimResult = workloadApiClient.claim(workloadId)
 
-    verify(exactly = 1) { workloadApi.workloadClaim(any()) }
+    verify(exactly = 1) { internalWorkloadApiClient.workloadClaim(any()) }
     assertEquals(response.claimed, claimResult)
   }
 
@@ -123,11 +76,12 @@ internal class WorkloadApiClientTest {
   internal fun `test if an exception occurs during a claim request to the Workload API, the workload is not claimed`() {
     val workloadId = "workload-id"
 
-    every { workloadApi.workloadClaim(any()) } throws ClientException(message = "test", statusCode = HttpStatus.NOT_FOUND.code)
+    every { internalWorkloadApiClient.workloadClaim(any()) } throws
+      ApiException(message = "test", statusCode = HttpStatus.NOT_FOUND.code, url = "http://localhost/test")
 
     val claimResult = workloadApiClient.claim(workloadId)
 
-    verify(exactly = 1) { workloadApi.workloadClaim(any()) }
+    verify(exactly = 1) { internalWorkloadApiClient.workloadClaim(any()) }
     assertEquals(false, claimResult)
   }
 }

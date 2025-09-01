@@ -28,6 +28,7 @@ dependencies {
   implementation(libs.reactor.core)
   implementation(libs.slf4j.api)
   implementation(libs.swagger.annotations)
+  implementation(libs.okhttp.logging.interceptor)
   implementation(project(":oss:airbyte-commons"))
 
   compileOnly(libs.v3.swagger.annotations)
@@ -47,7 +48,7 @@ val genConnectorBuilderServerApiClient =
   tasks.register<GenerateTask>("genConnectorBuilderServerApiClient") {
     val clientOutputDir = "${getLayout().buildDirectory.get()}/generated/connectorbuilderserverapi/client"
 
-    inputs.file(connectorBuilderServerSpecFile)
+    inputs.file(connectorBuilderServerSpecFile).withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.dir(clientOutputDir)
 
     generatorName = "kotlin"

@@ -107,6 +107,10 @@ enum class OssMetricsRegistry(
     metricName = "api-client.success",
     metricDescription = "API client successful request count",
   ),
+  API_TRACE(
+    metricName = "api-trace",
+    metricDescription = "",
+  ),
   ATTEMPTS_CREATED(
     metricName = "attempt_created",
     metricDescription = "increments when a new attempt is created. one is emitted per attempt",
@@ -173,6 +177,10 @@ enum class OssMetricsRegistry(
     metricName = "connector_registry_definition_processed",
     metricDescription = "increments when a connector registry definition is processed by the ApplyDefinitionsHelper",
   ),
+  ERROR_REPORTING_EVENT_COUNT(
+    metricName = "error_reporting_event_count",
+    metricDescription = "whenever when we report an error event",
+  ),
   EST_NUM_METRICS_EMITTED_BY_REPORTER(
     metricName = "est_num_metrics_emitted_by_reporter",
     metricDescription = "estimated metrics emitted by the reporter in the last interval. this is estimated since the count is not precise.",
@@ -196,10 +204,6 @@ enum class OssMetricsRegistry(
   JOB_SUCCEEDED_BY_RELEASE_STAGE(
     metricName = "job_succeeded_by_release_stage",
     metricDescription = "increments when a job succeeds. jobs are double counted as this is tagged by release stage.",
-  ),
-  JSON_STRING_LENGTH(
-    metricName = "json_string_length",
-    metricDescription = "string length of a raw json string",
   ),
   KUBE_POD_PROCESS_CREATE_TIME_MILLISECS(
     metricName = "kube_pod_process_create_time_millisecs",
@@ -339,6 +343,10 @@ enum class OssMetricsRegistry(
     metricName = "state_buffering",
     metricDescription = "number of state messages being buffered before a flush",
   ),
+  STATE_CHECKSUM_COUNT_ERROR(
+    metricName = "state_checksum_error",
+    metricDescription = "number of state checksum errors for a given connection",
+  ),
   STATE_COMMIT_ATTEMPT(
     metricName = "state_commit_attempt",
     metricDescription = "number of attempts to commit states from the orchestrator/workers",
@@ -467,6 +475,14 @@ enum class OssMetricsRegistry(
     metricName = "workflows_healed",
     metricDescription = "number of workflow the self healing cron healed",
   ),
+  WORKLOAD_LAUNCHER_CRON(
+    metricName = "workload_launcher_cron",
+    metricDescription = "number of cron run for the workload_launcher",
+  ),
+  WORKLOAD_LAUNCHER_CRON_DURATION(
+    metricName = "workload_launcher_cron_duration",
+    metricDescription = "duration of a run of the workload_launcher",
+  ),
   WORKLOAD_MONITOR_RUN(
     metricName = "workload_monitor_run",
     metricDescription = "number of cron run for the workload_monitor",
@@ -587,6 +603,10 @@ enum class OssMetricsRegistry(
     metricName = "delete_secret_default_store",
     metricDescription = "A secret was created in the default configured secret store.",
   ),
+  DELETE_SECRET(
+    metricName = "delete_secret",
+    metricDescription = "A secret was deleted from a secrets manager.",
+  ),
   CATALOG_SIZE_VALIDATION_ERROR(
     metricName = "catalog_size_validation_error",
     metricDescription = "The catalog provided by the user was larger than our limit and rejected.",
@@ -695,6 +715,18 @@ enum class OssMetricsRegistry(
     metricName = "workload_launcher_rehydrate_failure",
     metricDescription = "tracks whenever the launcher rehydrate process failed",
   ),
+  WORKLOAD_LAUNCHER_NON_STAGE_FAILURE(
+    metricName = "workload_launcher_non_stage_failure",
+    metricDescription = "Count of launcher errors occurring outside the staged pipeline",
+  ),
+  WORKLOAD_QUEUE_CONSUMER_FAILURE(
+    metricName = "workload_queue_consumer_failure",
+    metricDescription = "Count of errors in the consumer",
+  ),
+  WORKLOAD_QUEUE_MESSAGES_POLLED(
+    metricName = "workload_queue_messages_polled",
+    metricDescription = "Count of messages polled",
+  ),
   WORKLOAD_QUEUE_SIZE(
     metricName = "workload_queue_size",
     metricDescription = "used to track the queue size launcher does not processes a workload successfully",
@@ -731,6 +763,14 @@ enum class OssMetricsRegistry(
     metricName = "workload_processed",
     metricDescription = "increments when the launcher processes a workload",
   ),
+  WORKLOAD_RUNAWAY_POD(
+    metricName = "workload_runaway_pod",
+    metricDescription = "increments when an unexpected workload is found",
+  ),
+  WORKLOAD_RUNAWAY_POD_DELETED(
+    metricName = "workload_runaway_pod_deleted",
+    metricDescription = "increments when an unexpected workload is deleted",
+  ),
   WORKLOAD_STAGE_START(
     metricName = "workload_stage_start",
     metricDescription = "increments when a workload stage starts",
@@ -743,6 +783,10 @@ enum class OssMetricsRegistry(
     metricName = "workload_stage_duration",
     metricDescription = "a distribution of the duration of a workload stage",
   ),
+  WORKLOAD_TIME_TO_TRANSITION_FROM_CREATE(
+    metricName = "workload_time_to_transition_from_create",
+    metricDescription = "time for a workload to transition to a given state",
+  ),
   PODS_DELETED_FOR_MUTEX_KEY(
     metricName = "workload_pods_deleted_for_mutex_key",
     metricDescription = "existing pods for the provided mutex key were found and deleted",
@@ -754,6 +798,26 @@ enum class OssMetricsRegistry(
   PRODUCER_TO_POD_STARTED_LATENCY_MS(
     metricName = "producer_to_pod_started_latency_ms",
     metricDescription = "the time it takes to produce a message until it is fully processed",
+  ),
+  CUSTOMER_IO_EMAIL_NOTIFICATION_SEND(
+    metricName = "customerio_email_notification_send",
+    metricDescription = "a customer io email notification was sent",
+  ),
+  DATA_OBS_OUTLIER_CHECK(
+    metricName = "data_obs_outlier_check",
+    metricDescription = "outcome of the outlier check",
+  ),
+  DATA_OBS_OUTLIER_CHECK_ERRORS(
+    metricName = "data_obs_outlier_check_errors",
+    metricDescription = "number of errors encountered during the outlier check",
+  ),
+  DATABASE_PRUNING_JOBS_DELETED(
+    metricName = "database_pruning_jobs_deleted",
+    metricDescription = "number of jobs deleted during database pruning operation",
+  ),
+  DATABASE_PRUNING_DURATION(
+    metricName = "database_pruning_duration",
+    metricDescription = "duration of database pruning operation",
   ),
   ;
 

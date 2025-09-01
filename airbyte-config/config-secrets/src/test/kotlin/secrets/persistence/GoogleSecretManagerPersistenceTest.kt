@@ -15,10 +15,11 @@ import com.google.cloud.secretmanager.v1.SecretPayload
 import com.google.cloud.secretmanager.v1.SecretVersion
 import com.google.cloud.secretmanager.v1.SecretVersionName
 import com.google.protobuf.ByteString
-import io.airbyte.config.secrets.SecretCoordinate
+import io.airbyte.config.secrets.SecretCoordinate.AirbyteManagedSecretCoordinate
 import io.airbyte.config.secrets.persistence.GoogleSecretManagerPersistence.Companion.replicationPolicy
 import io.airbyte.metrics.MetricClient
 import io.grpc.Status
+import io.grpc.StatusRuntimeException
 import io.micrometer.core.instrument.Counter
 import io.mockk.Runs
 import io.mockk.coEvery
@@ -37,13 +38,13 @@ class GoogleSecretManagerPersistenceTest {
   fun `test reading secret from client`() {
     val secret = "secret value"
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockResponse: AccessSecretVersionResponse = mockk()
     val mockPayload: SecretPayload = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
 
     every { mockPayload.data } returns ByteString.copyFromUtf8(secret)
     every { mockResponse.payload } returns mockPayload
@@ -59,11 +60,11 @@ class GoogleSecretManagerPersistenceTest {
   @Test
   fun `test reading a secret that doesn't exist from the client`() {
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
 
     every { mockGoogleClient.accessSecretVersion(ofType(SecretVersionName::class)) } throws
       NotFoundException(
@@ -87,13 +88,13 @@ class GoogleSecretManagerPersistenceTest {
   fun `test writing a secret via the client creates the secret`() {
     val secret = "secret value"
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockResponse: AccessSecretVersionResponse = mockk()
     val mockPayload: SecretPayload = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
 
     every { mockPayload.data } returns ByteString.copyFromUtf8(secret)
     every { mockResponse.payload } returns mockPayload
@@ -111,7 +112,7 @@ class GoogleSecretManagerPersistenceTest {
     every { mockClient.createClient() } returns mockGoogleClient
     every { mockMetric.count(metric = any(), value = any(), attributes = anyVararg()) } returns mockk<Counter>()
 
-    persistence.write(coordinate, secret)
+    persistence.write(coordinate!!, secret)
 
     verify { mockGoogleClient.createSecret(any<ProjectName>(), any<String>(), any<Secret>()) }
     verify { mockGoogleClient.addSecretVersion(any<SecretName>(), any<SecretPayload>()) }
@@ -121,13 +122,13 @@ class GoogleSecretManagerPersistenceTest {
   fun `test writing a secret with expiry via the client creates the secret with expiry`() {
     val secret = "secret value"
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockResponse: AccessSecretVersionResponse = mockk()
     val mockPayload: SecretPayload = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
 
     every { mockPayload.data } returns ByteString.copyFromUtf8(secret)
     every { mockResponse.payload } returns mockPayload
@@ -167,13 +168,13 @@ class GoogleSecretManagerPersistenceTest {
   fun `test writing a secret via the client updates an existing secret`() {
     val secret = "secret value"
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockResponse: AccessSecretVersionResponse = mockk()
     val mockPayload: SecretPayload = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
 
     every { mockPayload.data } returns ByteString.copyFromUtf8(secret)
     every { mockResponse.payload } returns mockPayload
@@ -192,13 +193,13 @@ class GoogleSecretManagerPersistenceTest {
   fun `test exception when adding a secret version deletes new secret`() {
     val secret = "secret value"
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockResponse: AccessSecretVersionResponse = mockk()
     val mockPayload: SecretPayload = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
     val mockSecret: Secret = mockk()
 
     every { mockPayload.data } returns ByteString.copyFromUtf8(secret)
@@ -231,13 +232,13 @@ class GoogleSecretManagerPersistenceTest {
   fun `test exception when adding a secret version does not delete a pre-existing secret`() {
     val secret = "secret value"
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockResponse: AccessSecretVersionResponse = mockk()
     val mockPayload: SecretPayload = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
 
     every { mockPayload.data } returns ByteString.copyFromUtf8(secret)
     every { mockResponse.payload } returns mockPayload
@@ -258,13 +259,13 @@ class GoogleSecretManagerPersistenceTest {
   fun `test deleting a secret via the client deletes the secret`() {
     val secret = "secret value"
     val projectId = "test"
-    val coordinate = SecretCoordinate.fromFullCoordinate("secret_coordinate_v1")
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
     val mockClient: GoogleSecretManagerServiceClient = mockk()
     val mockGoogleClient: SecretManagerServiceClient = mockk()
     val mockResponse: AccessSecretVersionResponse = mockk()
     val mockPayload: SecretPayload = mockk()
     val mockMetric: MetricClient = mockk()
-    val persistence = GoogleSecretManagerPersistence(projectId, mockClient, mockMetric)
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
 
     every { mockPayload.data } returns ByteString.copyFromUtf8(secret)
     every { mockResponse.payload } returns mockPayload
@@ -274,6 +275,33 @@ class GoogleSecretManagerPersistenceTest {
     every { mockMetric.count(metric = any(), value = any(), attributes = anyVararg()) } returns mockk<Counter>()
 
     persistence.delete(coordinate)
+
+    verify { mockGoogleClient.deleteSecret(any<SecretName>()) }
+  }
+
+  @Test
+  fun `test deleting a secret that doesn't exist swallows NotFoundException`() {
+    val projectId = "test"
+    val coordinate = AirbyteManagedSecretCoordinate("airbyte_secret_coordinate", 1L)
+    val mockClient: GoogleSecretManagerServiceClient = mockk()
+    val mockGoogleClient: SecretManagerServiceClient = mockk()
+    val mockMetric: MetricClient = mockk()
+    val persistence = GoogleSecretManagerPersistence(projectId, null, mockClient, mockMetric)
+
+    every { mockClient.createClient() } returns mockGoogleClient
+    every { mockGoogleClient.deleteSecret(any<SecretName>()) } throws
+      NotFoundException(
+        StatusRuntimeException(Status.NOT_FOUND),
+        GrpcStatusCode.of(
+          Status.Code.NOT_FOUND,
+        ),
+        false,
+      )
+    every { mockGoogleClient.close() } returns Unit
+
+    Assertions.assertDoesNotThrow {
+      persistence.delete(coordinate)
+    }
 
     verify { mockGoogleClient.deleteSecret(any<SecretName>()) }
   }

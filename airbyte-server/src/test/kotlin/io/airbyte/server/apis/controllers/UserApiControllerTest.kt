@@ -15,33 +15,40 @@ import io.airbyte.api.model.generated.UserUpdate
 import io.airbyte.api.model.generated.UserWithPermissionInfoReadList
 import io.airbyte.api.model.generated.WorkspaceIdRequestBody
 import io.airbyte.api.model.generated.WorkspaceUserAccessInfoReadList
-import io.airbyte.api.model.generated.WorkspaceUserReadList
 import io.airbyte.commons.json.Jsons
 import io.airbyte.commons.server.handlers.UserHandler
 import io.airbyte.server.assertStatus
 import io.airbyte.server.status
+import io.micronaut.context.ApplicationContext
 import io.micronaut.http.HttpRequest
 import io.micronaut.http.HttpStatus
 import io.micronaut.http.client.HttpClient
 import io.micronaut.http.client.annotation.Client
-import io.micronaut.test.annotation.MockBean
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.inject.Inject
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @MicronautTest
 internal class UserApiControllerTest {
   @Inject
+  lateinit var context: ApplicationContext
+
   lateinit var userHandler: UserHandler
 
   @Inject
   @Client("/")
   lateinit var client: HttpClient
 
-  @MockBean(UserHandler::class)
-  fun userHandler(): UserHandler = mockk()
+  @BeforeAll
+  fun setupMock() {
+    userHandler = mockk()
+    context.registerSingleton(UserHandler::class.java, userHandler)
+  }
 
   @Test
   fun testGetUser() {
@@ -89,14 +96,6 @@ internal class UserApiControllerTest {
 
     val path = "/api/v1/users/list_by_organization_id"
     assertStatus(HttpStatus.OK, client.status(HttpRequest.POST(path, OrganizationIdRequestBody())))
-  }
-
-  @Test
-  fun testListUsersInWorkspace() {
-    every { userHandler.listUsersInWorkspace(any()) } returns WorkspaceUserReadList()
-
-    val path = "/api/v1/users/list_by_workspace_id"
-    assertStatus(HttpStatus.OK, client.status(HttpRequest.POST(path, WorkspaceIdRequestBody())))
   }
 
   @Test

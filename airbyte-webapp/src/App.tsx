@@ -15,6 +15,7 @@ import { OSSAuthService } from "core/services/auth";
 import { defaultOssFeatures, defaultEnterpriseFeatures, FeatureService } from "core/services/features";
 import { I18nProvider } from "core/services/i18n";
 import { BlockerService } from "core/services/navigation";
+import { DrawerContextProvider } from "core/services/ui/DrawerService";
 import { isDevelopment } from "core/utils/isDevelopment";
 import { ConfirmationModalService } from "hooks/services/ConfirmationModal";
 import { FormChangeTrackerService } from "hooks/services/FormChangeTracker";
@@ -41,9 +42,11 @@ const Services: React.FC<React.PropsWithChildren<unknown>> = ({ children }) => {
           <OSSAuthService>
             <ConfirmationModalService>
               <ModalServiceProvider>
-                <FormChangeTrackerService>
-                  <HelmetProvider>{children}</HelmetProvider>
-                </FormChangeTrackerService>
+                <DrawerContextProvider>
+                  <FormChangeTrackerService>
+                    <HelmetProvider>{children}</HelmetProvider>
+                  </FormChangeTrackerService>
+                </DrawerContextProvider>
               </ModalServiceProvider>
             </ConfirmationModalService>
           </OSSAuthService>
@@ -55,7 +58,7 @@ const Services: React.FC<React.PropsWithChildren<unknown>> = ({ children }) => {
 
 const App: React.FC = () => {
   return (
-    <React.StrictMode>
+    <>
       <AirbyteThemeProvider>
         <I18nProvider>
           <QueryProvider>
@@ -72,7 +75,7 @@ const App: React.FC = () => {
         </I18nProvider>
       </AirbyteThemeProvider>
       {isDevelopment() && <DevToolsToggle />}
-    </React.StrictMode>
+    </>
   );
 };
 

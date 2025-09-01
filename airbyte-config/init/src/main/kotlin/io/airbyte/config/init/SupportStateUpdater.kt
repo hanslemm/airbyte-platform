@@ -5,7 +5,6 @@
 package io.airbyte.config.init
 
 import com.google.common.annotations.VisibleForTesting
-import io.airbyte.commons.string.Strings
 import io.airbyte.commons.version.Version
 import io.airbyte.config.ActorDefinitionBreakingChange
 import io.airbyte.config.ActorDefinitionVersion
@@ -15,7 +14,7 @@ import io.airbyte.config.StandardDestinationDefinition
 import io.airbyte.config.StandardSourceDefinition
 import io.airbyte.config.init.BreakingChangeNotificationHelper.BreakingChangeNotificationData
 import io.airbyte.config.persistence.BreakingChangesHelper
-import io.airbyte.data.exceptions.ConfigNotFoundException
+import io.airbyte.data.ConfigNotFoundException
 import io.airbyte.data.services.ActorDefinitionService
 import io.airbyte.data.services.DestinationService
 import io.airbyte.data.services.SourceService
@@ -23,14 +22,16 @@ import io.airbyte.featureflag.ANONYMOUS
 import io.airbyte.featureflag.FeatureFlagClient
 import io.airbyte.featureflag.NotifyBreakingChangesOnSupportStateUpdate
 import io.airbyte.featureflag.Workspace
+import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.inject.Singleton
-import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.time.LocalDate
 import java.util.Optional
 import java.util.UUID
 import java.util.stream.Stream
 import kotlin.jvm.optionals.getOrDefault
+
+private val log = KotlinLogging.logger {}
 
 private const val AUTO_UPGRADE = "auto_upgrade"
 
@@ -48,7 +49,6 @@ class SupportStateUpdater(
   private val featureFlagClient: FeatureFlagClient,
 ) {
   companion object {
-    private val log = LoggerFactory.getLogger(SupportStateUpdater::class.java)
   }
 
   data class SupportStateUpdate(
@@ -100,9 +100,9 @@ class SupportStateUpdater(
    */
   @VisibleForTesting
   fun getSupportStateUpdate(
-    currentDefaultVersion: Version?,
+    currentDefaultVersion: Version,
     referenceDate: LocalDate?,
-    breakingChangesForDefinition: List<ActorDefinitionBreakingChange?>,
+    breakingChangesForDefinition: List<ActorDefinitionBreakingChange>,
     actorDefinitionVersions: List<ActorDefinitionVersion>,
   ): SupportStateUpdate {
     if (breakingChangesForDefinition.isEmpty()) {
@@ -129,12 +129,11 @@ class SupportStateUpdater(
         .stream()
         .filter { breakingChange: ActorDefinitionBreakingChange -> LocalDate.parse(breakingChange.upgradeDeadline).isAfter(referenceDate) }
         .max(Comparator.comparing { obj: ActorDefinitionBreakingChange -> obj.upgradeDeadline })
-    log.info(
-      "CurrentDefaultVersion: {}, LatestStableBreakingChange: {}, LatestFutureBreakingChange: {}",
-      currentDefaultVersion?.toString(),
-      latestStaleBreakingChange.map { it.version }.getOrDefault("<None>"),
-      latestFutureBreakingChange.map { it.version }.getOrDefault("<None>"),
-    )
+    log.debug {
+      "CurrentDefaultVersion: $currentDefaultVersion, LatestStableBreakingChange: ${latestStaleBreakingChange.map { it.version }.getOrDefault(
+        "<None>",
+      )}, LatestFutureBreakingChange: ${latestFutureBreakingChange.map { it.version }.getOrDefault("<None>")}"
+    }
 
     val versionIdsToUpdateByState =
       mapOf(
@@ -173,7 +172,7 @@ class SupportStateUpdater(
   @VisibleForTesting
   @Throws(IOException::class, ConfigNotFoundException::class)
   fun updateSupportStates(referenceDate: LocalDate?) {
-    log.info("Updating support states for all definitions")
+    log.info { "Updating support states for all definitions" }
     val sourceDefinitions = sourceService.listPublicSourceDefinitions(false)
     val destinationDefinitions = destinationService.listPublicDestinationDefinitions(false)
     val allBreakingChanges = actorDefinitionService.listBreakingChanges()
@@ -183,7 +182,7 @@ class SupportStateUpdater(
     val syncUpcomingAutoUpgradeNotificationData: MutableList<BreakingChangeNotificationData> = ArrayList()
 
     for (sourceDefinition in sourceDefinitions) {
-      log.info("Processing source definition {} {}", sourceDefinition.sourceDefinitionId, sourceDefinition.name)
+      log.debug { "Processing source definition ${sourceDefinition.sourceDefinitionId} ${sourceDefinition.name}" }
       val actorDefinitionVersions =
         actorDefinitionService.listActorDefinitionVersionsForDefinition(sourceDefinition.sourceDefinitionId)
       val currentDefaultVersion = getVersionTag(actorDefinitionVersions, sourceDefinition.defaultVersionId)
@@ -192,24 +191,18 @@ class SupportStateUpdater(
         getSupportStateUpdate(currentDefaultVersion, referenceDate, breakingChangesForDef, actorDefinitionVersions)
       comboSupportStateUpdate = SupportStateUpdate.merge(comboSupportStateUpdate, supportStateUpdate)
 
-      log.info(
-        "Supported versions for {} {}: {}",
-        sourceDefinition.sourceDefinitionId,
-        sourceDefinition.name,
-        Strings.join(supportStateUpdate.supportedVersionIds, ","),
-      )
-      log.info(
-        "Deprecated versions for {} {}: {}",
-        sourceDefinition.sourceDefinitionId,
-        sourceDefinition.name,
-        Strings.join(supportStateUpdate.deprecatedVersionIds, ","),
-      )
-      log.info(
-        "Unsupported versions for {} {}: {}",
-        sourceDefinition.sourceDefinitionId,
-        sourceDefinition.name,
-        Strings.join(supportStateUpdate.unsupportedVersionIds, ","),
-      )
+      log.debug {
+        "Supported versions for ${sourceDefinition.sourceDefinitionId} ${sourceDefinition.name}: " +
+          "${supportStateUpdate.supportedVersionIds.joinToString(",")}"
+      }
+      log.debug {
+        "Deprecated versions for ${sourceDefinition.sourceDefinitionId} ${sourceDefinition.name}: " +
+          "${supportStateUpdate.deprecatedVersionIds.joinToString(",")}"
+      }
+      log.debug {
+        "Unsupported versions for ${sourceDefinition.sourceDefinitionId} ${sourceDefinition.name}: " +
+          "${supportStateUpdate.unsupportedVersionIds.joinToString(",")}"
+      }
       if (shouldNotifyBreakingChanges() && supportStateUpdate.deprecatedVersionIds.isNotEmpty()) {
         val latestBreakingChange =
           BreakingChangesHelper.getLastApplicableBreakingChange(
@@ -268,7 +261,7 @@ class SupportStateUpdater(
     executeSupportStateUpdate(comboSupportStateUpdate)
     breakingChangeNotificationHelper.notifyDeprecatedSyncs(syncDeprecatedNotificationData)
     breakingChangeNotificationHelper.notifyUpcomingUpgradeSyncs(syncUpcomingAutoUpgradeNotificationData)
-    log.info("Finished updating support states for all definitions")
+    log.info { "Finished updating support states for all definitions" }
   }
 
   @VisibleForTesting
@@ -345,13 +338,13 @@ class SupportStateUpdater(
   @Throws(ConfigNotFoundException::class, IOException::class)
   fun updateSupportStatesForSourceDefinition(sourceDefinition: StandardSourceDefinition) {
     if (!sourceDefinition.custom) {
-      log.info("Updating support states for source definition: {}", sourceDefinition.name)
+      log.info { "Updating support states for source definition: ${sourceDefinition.name}" }
       val defaultActorDefinitionVersion =
         actorDefinitionService.getActorDefinitionVersion(sourceDefinition.defaultVersionId)
       val currentDefaultVersion = Version(defaultActorDefinitionVersion.dockerImageTag)
       updateSupportStatesForActorDefinition(sourceDefinition.sourceDefinitionId, currentDefaultVersion)
 
-      log.info("Finished updating support states for source definition: {}", sourceDefinition.name)
+      log.info { "Finished updating support states for source definition: ${sourceDefinition.name}" }
     }
   }
 
@@ -361,13 +354,13 @@ class SupportStateUpdater(
   @Throws(ConfigNotFoundException::class, IOException::class)
   fun updateSupportStatesForDestinationDefinition(destinationDefinition: StandardDestinationDefinition) {
     if (!destinationDefinition.custom) {
-      log.info("Updating support states for destination definition: {}", destinationDefinition.name)
+      log.info { "Updating support states for destination definition: ${destinationDefinition.name}" }
       val defaultActorDefinitionVersion =
         actorDefinitionService.getActorDefinitionVersion(destinationDefinition.defaultVersionId)
       val currentDefaultVersion = Version(defaultActorDefinitionVersion.dockerImageTag)
       updateSupportStatesForActorDefinition(destinationDefinition.destinationDefinitionId, currentDefaultVersion)
 
-      log.info("Finished updating support states for destination definition: {}", destinationDefinition.name)
+      log.info { "Finished updating support states for destination definition: ${destinationDefinition.name}" }
     }
   }
 

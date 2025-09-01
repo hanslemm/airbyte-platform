@@ -5,15 +5,14 @@
 import dev.failsafe.RetryPolicy
 import io.airbyte.metrics.MetricClient
 import io.airbyte.workload.launcher.PodSweeper
+import io.airbyte.workload.launcher.client.KubernetesClientWrapper
 import io.fabric8.kubernetes.api.model.Pod
 import io.fabric8.kubernetes.api.model.PodBuilder
 import io.fabric8.kubernetes.client.KubernetesClient
-import io.fabric8.kubernetes.client.server.mock.KubernetesServer
+import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient
 import io.mockk.mockk
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
@@ -21,26 +20,12 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
+@EnableKubernetesMockClient(crud = true)
 class PodSweeperTest {
-  // The Fabric8 mock server. This spins up a fake K8s APIServer in memory.
-  // We can create pods in it, then verify they get deleted, etc.
-  private val server: KubernetesServer = KubernetesServer(true, true)
-
   private val mockRetryPolicy: RetryPolicy<Any> = RetryPolicy.ofDefaults()
   private val mockMetricClient: MetricClient = mockk(relaxed = true)
 
   private lateinit var client: KubernetesClient
-
-  @BeforeEach
-  fun setupClient() {
-    server.before()
-    client = server.client
-  }
-
-  @AfterEach
-  fun destroy() {
-    server.after()
-  }
 
   @Test
   fun `test no pods - nothing to delete`() {
@@ -325,11 +310,10 @@ class PodSweeperTest {
     unSucceededTtl: Long?,
   ): PodSweeper =
     PodSweeper(
-      client,
+      KubernetesClientWrapper(client, mockRetryPolicy),
       mockMetricClient,
       Clock.systemUTC(),
       "default",
-      mockRetryPolicy,
       runningTtL,
       succeededTtl,
       unSucceededTtl,

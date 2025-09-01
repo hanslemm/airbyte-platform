@@ -1,21 +1,20 @@
 import { useMemo } from "react";
 import { FieldArrayWithId } from "react-hook-form";
-import * as yup from "yup";
 
-import { useCurrentWorkspace, useGetDestinationDefinitionSpecification } from "core/api";
+import { useCurrentWorkspace, useGetDataplaneGroup, useGetDestinationDefinitionSpecification } from "core/api";
 import {
   AirbyteCatalog,
   DestinationSyncMode,
   SyncMode,
   ConnectionScheduleData,
   ConnectionScheduleType,
-  Geography,
   NamespaceDefinitionType,
   NonBreakingChangesPreference,
   SchemaChangeBackfillPreference,
   Tag,
+  AirbyteStreamAndConfiguration,
+  AirbyteStream,
 } from "core/api/types/AirbyteClient";
-import { FeatureItem, useFeature } from "core/services/features";
 import { ConnectionFormMode, ConnectionOrPartialConnection } from "hooks/services/ConnectionForm/ConnectionFormService";
 
 import { analyzeSyncCatalogBreakingChanges } from "./calculateInitialCatalog";
@@ -24,13 +23,18 @@ import {
   BASIC_FREQUENCY_DEFAULT_VALUE,
   SOURCE_SPECIFIC_FREQUENCY_DEFAULT,
 } from "./ScheduleFormField/useBasicFrequencyDropdownData";
-import {
-  namespaceDefinitionSchema,
-  namespaceFormatSchema,
-  syncCatalogSchema,
-  useGetScheduleDataSchema,
-} from "./schema";
 import { updateStreamSyncMode } from "../SyncCatalogTable/utils";
+
+type AirbyteCatalogWithAnySchema = Omit<AirbyteCatalog, "streams"> & {
+  streams: Array<
+    Omit<AirbyteStreamAndConfiguration, "stream"> & {
+      stream?: Omit<AirbyteStream, "jsonSchema"> & {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        jsonSchema?: Record<string, any>;
+      };
+    }
+  >;
+};
 
 /**
  * react-hook-form form values type for the connection form
@@ -43,8 +47,8 @@ export interface FormConnectionFormValues {
   namespaceFormat?: string;
   prefix: string;
   nonBreakingChangesPreference?: NonBreakingChangesPreference;
-  geography?: Geography;
-  syncCatalog: AirbyteCatalog;
+  geography?: string;
+  syncCatalog: AirbyteCatalogWithAnySchema;
   notifySchemaChanges?: boolean;
   backfillPreference?: SchemaChangeBackfillPreference;
   tags?: Tag[];
@@ -67,48 +71,11 @@ export const SUPPORTED_MODES: Array<[SyncMode, DestinationSyncMode]> = [
   [SyncMode.full_refresh, DestinationSyncMode.overwrite_dedup],
 ];
 
-/**
- * useConnectionValidationSchema with additional arguments
- */
-export const useConnectionValidationSchema = () => {
-  const allowAutoDetectSchema = useFeature(FeatureItem.AllowAutoDetectSchema);
-  const scheduleDataSchema = useGetScheduleDataSchema();
-  return useMemo(
-    () =>
-      yup
-        .object({
-          name: yup.string().required("form.empty.error"),
-          // scheduleType can't be 'undefined', make it required()
-          scheduleType: yup.mixed<ConnectionScheduleType>().oneOf(Object.values(ConnectionScheduleType)).required(),
-          scheduleData: scheduleDataSchema,
-          namespaceDefinition: namespaceDefinitionSchema.required("form.empty.error"),
-          namespaceFormat: namespaceFormatSchema,
-          prefix: yup.string().default(""),
-          nonBreakingChangesPreference: allowAutoDetectSchema
-            ? yup.mixed().oneOf(Object.values(NonBreakingChangesPreference)).required("form.empty.error")
-            : yup.mixed().notRequired(),
-          geography: yup.mixed<Geography>().oneOf(Object.values(Geography)).optional(),
-          syncCatalog: syncCatalogSchema,
-          notifySchemaChanges: yup.boolean().optional(),
-          backfillPreference: yup.mixed().oneOf(Object.values(SchemaChangeBackfillPreference)).optional(),
-          tags: yup
-            .array()
-            .of(
-              yup
-                .object()
-                .shape({ tagId: yup.string(), name: yup.string(), color: yup.string(), workspaceId: yup.string() })
-            )
-            .notRequired(),
-        })
-        .noUnknown(),
-    [allowAutoDetectSchema, scheduleDataSchema]
-  );
-};
-
 // react-hook-form form values type for the connection form.
 export const useInitialFormValues = (
   connection: ConnectionOrPartialConnection,
-  mode: ConnectionFormMode
+  mode: ConnectionFormMode,
+  destinationSupportsFileTransfer?: boolean
 ): FormConnectionFormValues => {
   const workspace = useCurrentWorkspace();
   const destDefinitionSpecification = useGetDestinationDefinitionSpecification(connection.destination.destinationId);
@@ -151,8 +118,29 @@ export const useInitialFormValues = (
   }
 
   const defaultNonBreakingChangesPreference = NonBreakingChangesPreference.propagate_columns;
+  const { getDataplaneGroup } = useGetDataplaneGroup();
+
+  // Handle file-based streams selection and file inclusion based on destination file transfer support.
+  if (destinationSupportsFileTransfer !== undefined) {
+    syncCatalog.streams.forEach((airbyteStream) => {
+      const isFileBased = airbyteStream?.stream?.isFileBased;
+      const config = airbyteStream?.config;
+      if (!isFileBased || !config) {
+        return;
+      }
+
+      if (!destinationSupportsFileTransfer) {
+        config.selected = false;
+        config.includeFiles = false;
+        return;
+      }
+
+      config.includeFiles = true;
+    });
+  }
 
   return useMemo(() => {
+    const dataplaneGroupId = workspace.dataplaneGroupId;
     const initialValues: FormConnectionFormValues = {
       name: connection.name ?? `${connection.source.name} → ${connection.destination.name}`,
       scheduleType: connection.scheduleType ?? ConnectionScheduleType.basic,
@@ -175,7 +163,7 @@ export const useInitialFormValues = (
         prefix: connection.prefix ?? "",
       },
       nonBreakingChangesPreference: connection.nonBreakingChangesPreference ?? defaultNonBreakingChangesPreference,
-      geography: connection.geography || workspace.defaultGeography || "auto",
+      geography: getDataplaneGroup(dataplaneGroupId)?.name ?? "auto",
       syncCatalog: analyzeSyncCatalogBreakingChanges(syncCatalog, catalogDiff, schemaChange),
       notifySchemaChanges:
         connection.notifySchemaChanges ??
@@ -197,15 +185,15 @@ export const useInitialFormValues = (
     connection.namespaceFormat,
     connection.prefix,
     connection.nonBreakingChangesPreference,
-    connection.geography,
     connection.notifySchemaChanges,
     connection.backfillPreference,
     connection.tags,
     defaultNonBreakingChangesPreference,
-    workspace.defaultGeography,
+    workspace.dataplaneGroupId,
     syncCatalog,
     catalogDiff,
     schemaChange,
     notificationSettings?.sendOnConnectionUpdate,
+    getDataplaneGroup,
   ]);
 };

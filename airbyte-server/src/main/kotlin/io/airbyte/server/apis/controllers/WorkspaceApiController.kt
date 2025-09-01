@@ -9,15 +9,17 @@ import io.airbyte.api.model.generated.ConnectionIdRequestBody
 import io.airbyte.api.model.generated.ListResourcesForWorkspacesRequestBody
 import io.airbyte.api.model.generated.ListWorkspacesByUserRequestBody
 import io.airbyte.api.model.generated.ListWorkspacesInOrganizationRequestBody
+import io.airbyte.api.model.generated.OrganizationInfoRead
 import io.airbyte.api.model.generated.PermissionCheckRead
 import io.airbyte.api.model.generated.PermissionCheckRequest
 import io.airbyte.api.model.generated.PermissionType
 import io.airbyte.api.model.generated.SlugRequestBody
 import io.airbyte.api.model.generated.WorkspaceCreate
 import io.airbyte.api.model.generated.WorkspaceCreateWithId
+import io.airbyte.api.model.generated.WorkspaceGetDbtJobsRequest
+import io.airbyte.api.model.generated.WorkspaceGetDbtJobsResponse
 import io.airbyte.api.model.generated.WorkspaceGiveFeedback
 import io.airbyte.api.model.generated.WorkspaceIdRequestBody
-import io.airbyte.api.model.generated.WorkspaceOrganizationInfoRead
 import io.airbyte.api.model.generated.WorkspaceRead
 import io.airbyte.api.model.generated.WorkspaceReadList
 import io.airbyte.api.model.generated.WorkspaceUpdate
@@ -30,7 +32,7 @@ import io.airbyte.api.problems.throwable.generated.ApiNotImplementedInOssProblem
 import io.airbyte.api.problems.throwable.generated.ForbiddenProblem
 import io.airbyte.commons.annotation.AuditLogging
 import io.airbyte.commons.annotation.AuditLoggingProvider
-import io.airbyte.commons.auth.AuthRoleConstants
+import io.airbyte.commons.auth.roles.AuthRoleConstants
 import io.airbyte.commons.server.handlers.PermissionHandler
 import io.airbyte.commons.server.handlers.WorkspacesHandler
 import io.airbyte.commons.server.scheduling.AirbyteTaskExecutors
@@ -44,7 +46,6 @@ import io.micronaut.http.annotation.Status
 import io.micronaut.scheduling.annotation.ExecuteOn
 import io.micronaut.security.annotation.Secured
 import io.micronaut.security.rules.SecurityRule
-import java.util.concurrent.Callable
 
 @Controller("/api/v1/workspaces")
 @Secured(SecurityRule.IS_AUTHENTICATED)
@@ -67,7 +68,7 @@ open class WorkspaceApiController(
           permissionHandler
             .checkPermissions(
               PermissionCheckRequest()
-                .userId(currentUserService.currentUser.userId)
+                .userId(currentUserService.getCurrentUser().userId)
                 .permissionType(PermissionType.ORGANIZATION_ADMIN)
                 .organizationId(workspaceCreate.organizationId),
             ).status
@@ -94,7 +95,7 @@ open class WorkspaceApiController(
           permissionHandler
             .checkPermissions(
               PermissionCheckRequest()
-                .userId(currentUserService.currentUser.userId)
+                .userId(currentUserService.getCurrentUser().userId)
                 .permissionType(PermissionType.ORGANIZATION_ADMIN)
                 .organizationId(workspaceCreateWithId.organizationId),
             ).status
@@ -127,7 +128,7 @@ open class WorkspaceApiController(
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun getOrganizationInfo(
     @Body workspaceIdRequestBody: WorkspaceIdRequestBody,
-  ): WorkspaceOrganizationInfoRead? =
+  ): OrganizationInfoRead? =
     execute {
       workspacesHandler.getWorkspaceOrganizationInfo(
         workspaceIdRequestBody,
@@ -135,7 +136,12 @@ open class WorkspaceApiController(
     }
 
   @Post("/get")
-  @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
+  @Secured(
+    AuthRoleConstants.WORKSPACE_READER,
+    AuthRoleConstants.ORGANIZATION_READER,
+    AuthRoleConstants.DATAPLANE,
+    AuthRoleConstants.EMBEDDED_END_USER,
+  )
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun getWorkspace(
     @Body workspaceIdRequestBody: WorkspaceIdRequestBody,
@@ -155,29 +161,12 @@ open class WorkspaceApiController(
     @Body workspaceUsageRequestBody: WorkspaceUsageRequestBody?,
   ): WorkspaceUsageRead = throw ApiNotImplementedInOssProblem("Not implemented in this edition of Airbyte", null)
 
-  @Post("/list")
-  @Secured(AuthRoleConstants.AUTHENTICATED_USER)
-  @ExecuteOn(AirbyteTaskExecutors.IO)
-  override fun listWorkspaces(): WorkspaceReadList? = execute(Callable { workspacesHandler.listWorkspaces() })
-
-  @Post("/list_all_paginated")
-  @Secured(AuthRoleConstants.AUTHENTICATED_USER)
-  @ExecuteOn(AirbyteTaskExecutors.IO)
-  override fun listAllWorkspacesPaginated(
-    @Body listResourcesForWorkspacesRequestBody: ListResourcesForWorkspacesRequestBody,
-  ): io.airbyte.api.model.generated.WorkspaceReadList? =
-    execute {
-      workspacesHandler.listAllWorkspacesPaginated(
-        listResourcesForWorkspacesRequestBody,
-      )
-    }
-
   @Post(uri = "/list_paginated")
   @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun listWorkspacesPaginated(
     @Body listResourcesForWorkspacesRequestBody: ListResourcesForWorkspacesRequestBody,
-  ): io.airbyte.api.model.generated.WorkspaceReadList? =
+  ): WorkspaceReadList? =
     execute {
       workspacesHandler.listWorkspacesPaginated(
         listResourcesForWorkspacesRequestBody,
@@ -234,17 +223,32 @@ open class WorkspaceApiController(
     @Body connectionIdRequestBody: ConnectionIdRequestBody,
   ): WorkspaceRead? = execute { workspacesHandler.getWorkspaceByConnectionId(connectionIdRequestBody, true) }
 
+  @Post("/list_by_organization_id")
+  // No organization role is required because this endpoint can list workspaces within an org that a
+  // user does not have an org-level permission for. This endpoint only returns workspaces that the
+  // user has a permission for, so it is safe to authorize any authenticated user.
+  @Secured(AuthRoleConstants.AUTHENTICATED_USER)
+  @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun listWorkspacesInOrganization(
-    @Body request: ListWorkspacesInOrganizationRequestBody,
-  ): io.airbyte.api.model.generated.WorkspaceReadList? {
-    // To be implemented
-    return execute { workspacesHandler.listWorkspacesInOrganization(request) }
-  }
+    @Body listWorkspacesInOrganizationRequestBody: ListWorkspacesInOrganizationRequestBody,
+  ): WorkspaceReadList? =
+    execute {
+      workspacesHandler.listWorkspacesInOrganizationForUser(
+        userId = currentUserService.getCurrentUser().userId,
+        request = listWorkspacesInOrganizationRequestBody,
+      )
+    }
 
   @Post("/list_by_user_id")
   @Secured(AuthRoleConstants.READER, AuthRoleConstants.SELF)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun listWorkspacesByUser(
     @Body request: ListWorkspacesByUserRequestBody,
-  ): io.airbyte.api.model.generated.WorkspaceReadList? = execute { workspacesHandler.listWorkspacesByUser(request) }
+  ): WorkspaceReadList? = execute { workspacesHandler.listWorkspacesByUser(request) }
+
+  @Post("/get_available_dbt_jobs")
+  @Secured(AuthRoleConstants.WORKSPACE_EDITOR, AuthRoleConstants.ORGANIZATION_EDITOR)
+  @ExecuteOn(AirbyteTaskExecutors.IO)
+  override fun getAvailableDbtJobsForWorkspace(workspaceGetDbtJobsRequest: WorkspaceGetDbtJobsRequest?): WorkspaceGetDbtJobsResponse =
+    throw ApiNotImplementedInOssProblem()
 }

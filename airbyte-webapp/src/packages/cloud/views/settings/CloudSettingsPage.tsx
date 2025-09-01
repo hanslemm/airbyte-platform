@@ -27,36 +27,48 @@ export const CloudSettingsPage: React.FC = () => {
   const showAdvancedSettings = useExperiment("settings.showAdvancedSettings");
   const canManageOrganizationBilling = useGeneratedIntent(Intent.ManageOrganizationBilling);
   const canViewOrganizationUsage = useGeneratedIntent(Intent.ViewOrganizationUsage);
+  const canManageEmbedded = useIntent("CreateConfigTemplate", { organizationId: workspace.organizationId });
+  const allowConfigTemplateEndpoints = useExperiment("platform.allow-config-template-endpoints");
+  const showOrgPicker = useExperiment("sidebar.showOrgPicker");
 
   return (
     <SettingsLayout>
       <SettingsNavigation>
-        <SettingsNavigationBlock title={formatMessage({ id: "settings.userSettings" })}>
-          <SettingsLink
-            iconType="user"
-            name={formatMessage({ id: "settings.account" })}
-            to={CloudSettingsRoutePaths.Account}
-          />
-          <SettingsLink
-            iconType="grid"
-            name={formatMessage({ id: "settings.applications" })}
-            to={CloudSettingsRoutePaths.Applications}
-          />
-          {isOsanoActive() && (
-            <SettingsButton
-              iconType="parameters"
-              onClick={() => showOsanoDrawer()}
-              name={formatMessage({ id: "settings.cookiePreferences" })}
-            />
-          )}
-          {showAdvancedSettings && (
+        {!showOrgPicker && (
+          <SettingsNavigationBlock title={formatMessage({ id: "settings.userSettings" })}>
             <SettingsLink
-              iconType="gear"
-              name={formatMessage({ id: "settings.advanced" })}
-              to={CloudSettingsRoutePaths.Advanced}
+              iconType="user"
+              name={formatMessage({ id: "settings.account" })}
+              to={CloudSettingsRoutePaths.Account}
             />
-          )}
-        </SettingsNavigationBlock>
+            {canManageEmbedded && allowConfigTemplateEndpoints && (
+              <SettingsLink
+                iconType="stars"
+                name={formatMessage({ id: "settings.embedded" })}
+                to={CloudSettingsRoutePaths.Embedded}
+              />
+            )}
+            <SettingsLink
+              iconType="grid"
+              name={formatMessage({ id: "settings.applications" })}
+              to={CloudSettingsRoutePaths.Applications}
+            />
+            {isOsanoActive() && (
+              <SettingsButton
+                iconType="parameters"
+                onClick={() => showOsanoDrawer()}
+                name={formatMessage({ id: "settings.cookiePreferences" })}
+              />
+            )}
+            {showAdvancedSettings && (
+              <SettingsLink
+                iconType="gear"
+                name={formatMessage({ id: "settings.advanced" })}
+                to={CloudSettingsRoutePaths.Advanced}
+              />
+            )}
+          </SettingsNavigationBlock>
+        )}
         <SettingsNavigationBlock title={formatMessage({ id: "settings.workspaceSettings" })}>
           <SettingsLink
             iconType="gear"
@@ -97,8 +109,8 @@ export const CloudSettingsPage: React.FC = () => {
             to={CloudSettingsRoutePaths.Usage}
           />
         </SettingsNavigationBlock>
-        {canViewOrgSettings && (
-          <SettingsNavigationBlock title={formatMessage({ id: "settings.organizationSettings" })}>
+        {canViewOrgSettings && !showOrgPicker && (
+          <SettingsNavigationBlock title={formatMessage({ id: "settings.organization" })}>
             <SettingsLink
               iconType="gear"
               name={formatMessage({ id: "settings.general" })}

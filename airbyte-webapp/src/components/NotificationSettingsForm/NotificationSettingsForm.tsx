@@ -2,8 +2,7 @@ import classNames from "classnames";
 import React from "react";
 import { UseFormReturn } from "react-hook-form";
 import { FormattedMessage, useIntl } from "react-intl";
-import * as yup from "yup";
-import { SchemaOf } from "yup";
+import { z } from "zod";
 
 import { Form } from "components/forms";
 import { FormDevTools } from "components/forms/FormDevTools";
@@ -16,7 +15,7 @@ import { NotificationReadStatus, NotificationSettings, NotificationTrigger } fro
 import { FeatureItem, useFeature } from "core/services/features";
 import { trackError } from "core/utils/datadog";
 import { isFulfilled } from "core/utils/promises";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 import { useExperiment } from "hooks/services/Experiment";
 import { useNotificationService } from "hooks/services/Notification";
 import { useUpdateNotificationSettings } from "hooks/services/useWorkspace";
@@ -35,8 +34,7 @@ export const NotificationSettingsForm: React.FC = () => {
   const testWebhook = useTryNotificationWebhook();
   const { formatMessage } = useIntl();
   const { registerNotification } = useNotificationService();
-  const { workspaceId, organizationId } = useCurrentWorkspace();
-  const canUpdateWorkspace = useIntent("UpdateWorkspace", { workspaceId, organizationId });
+  const canUpdateWorkspace = useGeneratedIntent(Intent.UpdateWorkspace);
 
   const onSubmit = async (
     values: NotificationSettingsFormValues,
@@ -129,7 +127,7 @@ export const NotificationSettingsForm: React.FC = () => {
     <Form<NotificationSettingsFormValues>
       onSubmit={onSubmit}
       dataTestId="notification-settings-form"
-      schema={validationSchema}
+      zodSchema={validationSchema}
       defaultValues={defaultValues}
       reValidateMode="onChange"
       mode="onBlur"
@@ -190,33 +188,20 @@ export const NotificationSettingsForm: React.FC = () => {
   );
 };
 
-export interface NotificationItemFieldValue {
-  slack: boolean;
-  customerio: boolean;
-  slackWebhookLink?: string;
-}
+const notificationItemSchema = z
+  .object({
+    slack: z.boolean(),
+    customerio: z.boolean(),
+    slackWebhookLink: z.string().optional(),
+  })
+  .refine((values) => (values.slack === true ? values.slackWebhookLink?.trim() !== "" : true), {
+    path: ["slackWebhookLink"],
+    message: "form.empty.error",
+  });
 
-export interface NotificationSettingsFormValues {
-  sendOnFailure: NotificationItemFieldValue;
-  sendOnSuccess: NotificationItemFieldValue;
-  sendOnConnectionUpdate: NotificationItemFieldValue;
-  sendOnConnectionUpdateActionRequired: NotificationItemFieldValue;
-  sendOnSyncDisabled: NotificationItemFieldValue;
-  sendOnSyncDisabledWarning: NotificationItemFieldValue;
-  sendOnBreakingChangeWarning: NotificationItemFieldValue;
-  sendOnBreakingChangeSyncsDisabled: NotificationItemFieldValue;
-}
+export type NotificationItemFieldValue = z.infer<typeof notificationItemSchema>;
 
-const notificationItemSchema: SchemaOf<NotificationItemFieldValue> = yup.object({
-  slack: yup.boolean().required(),
-  customerio: yup.boolean().required(),
-  slackWebhookLink: yup.string().when("slack", {
-    is: true,
-    then: yup.string().required("form.empty.error"),
-  }),
-});
-
-const validationSchema: SchemaOf<NotificationSettingsFormValues> = yup.object({
+const validationSchema = z.object({
   sendOnFailure: notificationItemSchema,
   sendOnSuccess: notificationItemSchema,
   sendOnConnectionUpdate: notificationItemSchema,
@@ -226,6 +211,8 @@ const validationSchema: SchemaOf<NotificationSettingsFormValues> = yup.object({
   sendOnBreakingChangeWarning: notificationItemSchema,
   sendOnBreakingChangeSyncsDisabled: notificationItemSchema,
 });
+
+export type NotificationSettingsFormValues = z.infer<typeof validationSchema>;
 
 export const notificationKeys: Array<keyof NotificationSettings> = [
   "sendOnFailure",

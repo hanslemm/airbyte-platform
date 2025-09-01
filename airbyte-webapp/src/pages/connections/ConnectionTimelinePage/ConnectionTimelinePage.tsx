@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { FormattedMessage } from "react-intl";
 
 import { ConnectionSyncContextProvider } from "components/connection/ConnectionSync/ConnectionSyncContext";
@@ -10,6 +11,7 @@ import { ScrollParent } from "components/ui/ScrollParent";
 
 import { useCurrentConnection, useFilters, useGetConnectionEvent } from "core/api";
 import { PageTrackingCodes, useTrackPage } from "core/services/analytics";
+import { useDrawerActions } from "core/services/ui/DrawerService";
 import { useModalService } from "hooks/services/Modal";
 
 import { ConnectionTimelineAllEventsList, validateAndMapEvent } from "./ConnectionTimelineAllEventsList";
@@ -57,34 +59,40 @@ export const ConnectionTimelinePage = () => {
     });
   }
 
+  const { closeDrawer } = useDrawerActions();
+
+  useLayoutEffect(() => {
+    return () => {
+      closeDrawer();
+    };
+  }, [closeDrawer]);
+
   return (
     <ScrollParent>
       <PageContainer centered>
         <ConnectionSyncContextProvider>
-          <Box pb="xl">
-            <Card noPadding>
-              <Box p="lg">
-                <FlexContainer direction="column">
-                  <FlexContainer justifyContent="space-between" alignItems="center">
-                    <Heading as="h5" size="sm" data-testid="connectionTimelinePageHeader">
-                      <FormattedMessage id="connection.timeline" />
-                    </Heading>
-                  </FlexContainer>
-                  <ConnectionTimelineFilters
-                    filterValues={filterValues}
-                    setFilterValue={setFilterValue}
-                    resetFilters={resetFilters}
-                    filtersAreDefault={filtersAreDefault}
-                  />
+          <Card noPadding>
+            <Box p="lg">
+              <FlexContainer direction="column">
+                <FlexContainer justifyContent="space-between" alignItems="center">
+                  <Heading as="h5" size="sm" data-testid="connectionTimelinePageHeader">
+                    <FormattedMessage id="connection.timeline" />
+                  </Heading>
                 </FlexContainer>
-              </Box>
-              {filterValues.eventId ? (
-                <OneEventItem eventId={filterValues.eventId} connectionId={connection.connectionId} />
-              ) : (
-                <ConnectionTimelineAllEventsList filterValues={filterValues} />
-              )}
-            </Card>
-          </Box>
+                <ConnectionTimelineFilters
+                  filterValues={filterValues}
+                  setFilterValue={setFilterValue}
+                  resetFilters={resetFilters}
+                  filtersAreDefault={filtersAreDefault}
+                />
+              </FlexContainer>
+            </Box>
+            {filterValues.eventId ? (
+              <OneEventItem eventId={filterValues.eventId} connectionId={connection.connectionId} />
+            ) : (
+              <ConnectionTimelineAllEventsList filterValues={filterValues} />
+            )}
+          </Card>
         </ConnectionSyncContextProvider>
       </PageContainer>
     </ScrollParent>

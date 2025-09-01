@@ -10,9 +10,11 @@ import { QueryProvider } from "core/api";
 import { DefaultErrorBoundary } from "core/errors";
 import { AnalyticsProvider } from "core/services/analytics";
 import { HockeyStackAnalytics } from "core/services/analytics/HockeyStackAnalytics";
+import { PostHogAnalytics } from "core/services/analytics/PostHogAnalytics";
 import { defaultCloudFeatures, FeatureService } from "core/services/features";
 import { I18nProvider } from "core/services/i18n";
 import { BlockerService } from "core/services/navigation";
+import { DrawerContextProvider } from "core/services/ui/DrawerService";
 import { isDevelopment } from "core/utils/isDevelopment";
 import { ConfirmationModalService } from "hooks/services/ConfirmationModal";
 import { FormChangeTrackerService } from "hooks/services/FormChangeTracker";
@@ -31,9 +33,11 @@ const Services: React.FC<React.PropsWithChildren<unknown>> = ({ children }) => (
         <FeatureService features={defaultCloudFeatures}>
           <CloudAuthService>
             <ModalServiceProvider>
-              <HelmetProvider>
-                <ZendeskProvider>{children}</ZendeskProvider>
-              </HelmetProvider>
+              <DrawerContextProvider>
+                <HelmetProvider>
+                  <ZendeskProvider>{children}</ZendeskProvider>
+                </HelmetProvider>
+              </DrawerContextProvider>
             </ModalServiceProvider>
           </CloudAuthService>
         </FeatureService>
@@ -44,7 +48,7 @@ const Services: React.FC<React.PropsWithChildren<unknown>> = ({ children }) => (
 
 const App: React.FC = () => {
   return (
-    <React.StrictMode>
+    <>
       <AirbyteThemeProvider>
         <I18nProvider>
           <QueryProvider>
@@ -53,10 +57,12 @@ const App: React.FC = () => {
                 <DefaultErrorBoundary>
                   <AnalyticsProvider>
                     <HockeyStackAnalytics>
-                      <Services>
-                        <DeployPreviewMessage />
-                        <Routing />
-                      </Services>
+                      <PostHogAnalytics>
+                        <Services>
+                          <DeployPreviewMessage />
+                          <Routing />
+                        </Services>
+                      </PostHogAnalytics>
                     </HockeyStackAnalytics>
                   </AnalyticsProvider>
                 </DefaultErrorBoundary>
@@ -66,7 +72,7 @@ const App: React.FC = () => {
         </I18nProvider>
       </AirbyteThemeProvider>
       {isDevelopment() && <DevToolsToggle />}
-    </React.StrictMode>
+    </>
   );
 };
 

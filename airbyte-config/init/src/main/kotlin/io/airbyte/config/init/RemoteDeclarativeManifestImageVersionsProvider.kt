@@ -4,15 +4,18 @@
 
 package io.airbyte.config.init
 
+import io.airbyte.commons.constants.AirbyteCatalogConstants
 import io.airbyte.commons.json.Jsons
 import io.airbyte.commons.version.Version
 import io.airbyte.data.repositories.entities.DeclarativeManifestImageVersion
+import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.inject.Named
 import jakarta.inject.Singleton
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.slf4j.LoggerFactory
 import java.io.IOException
+
+private val log = KotlinLogging.logger {}
 
 @Singleton
 @Named("remoteDeclarativeManifestImageVersionsProvider")
@@ -20,11 +23,10 @@ class RemoteDeclarativeManifestImageVersionsProvider(
   @Named("dockerHubOkHttpClient") val okHttpClient: OkHttpClient,
 ) : DeclarativeManifestImageVersionsProvider {
   companion object {
-    private val log = LoggerFactory.getLogger(RemoteDeclarativeManifestImageVersionsProvider::class.java)
   }
 
   override fun getLatestDeclarativeManifestImageVersions(): List<DeclarativeManifestImageVersion> {
-    val repository = "airbyte/source-declarative-manifest"
+    val repository = AirbyteCatalogConstants.AIRBYTE_SOURCE_DECLARATIVE_MANIFEST_IMAGE
     val items = getTagsAndShasForRepository(repository)
 
     val semverStandardVersionTags = items.filter { (imageVersion, _) -> imageVersion.matches(Regex("""^\d+\.\d+\.\d+$""")) }

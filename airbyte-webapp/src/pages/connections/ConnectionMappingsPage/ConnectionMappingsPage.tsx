@@ -2,36 +2,48 @@ import { FormattedMessage, useIntl } from "react-intl";
 
 import { FormChangeTracker } from "components/forms/FormChangeTracker";
 import { PageContainer } from "components/PageContainer";
+import { BrandingBadge } from "components/ui/BrandingBadge";
 import { Button } from "components/ui/Button";
-import { FlexContainer } from "components/ui/Flex";
+import { FlexContainer, FlexItem } from "components/ui/Flex";
 import { Heading } from "components/ui/Heading";
+import { ExternalLink } from "components/ui/Link";
 import { ScrollParent } from "components/ui/ScrollParent";
 
+import { useIsDataActivationConnection } from "area/connection/utils/useIsDataActivationConnection";
 import { FeatureItem, IfFeatureDisabled, IfFeatureEnabled } from "core/services/features";
+import { useFormMode } from "core/services/ui/FormModeContext";
+import { links } from "core/utils/links";
 import { useConnectionEditService } from "hooks/services/ConnectionEdit/ConnectionEditService";
-import { useConnectionFormService } from "hooks/services/ConnectionForm/ConnectionFormService";
 import { useNotificationService } from "hooks/services/Notification";
 
 import { ConnectionMappingsList } from "./ConnectionMappingsList";
+import styles from "./ConnectionMappingsPage.module.scss";
 import { MappingContextProvider, useMappingContext, MAPPING_VALIDATION_ERROR_KEY } from "./MappingContext";
 import { MappingsEmptyState } from "./MappingsEmptyState";
 import { MappingsUpsellEmptyState } from "./MappingsUpsellEmptyState";
+import { EditDataActivationMappingsPage } from "../EditDataActivationMappingsPage";
 
-export const ConnectionMappingsPage = () => {
-  return (
+export const ConnectionMappingsRoute = () => {
+  const isDataActivationConnection = useIsDataActivationConnection();
+
+  return isDataActivationConnection ? (
+    <ScrollParent>
+      <EditDataActivationMappingsPage />
+    </ScrollParent>
+  ) : (
     <ScrollParent>
       <PageContainer centered>
         <MappingContextProvider>
-          <ConnectionMappingsPageContent />
+          <ConnectionMappingsPage />
         </MappingContextProvider>
       </PageContainer>
     </ScrollParent>
   );
 };
 
-const ConnectionMappingsPageContent = () => {
+const ConnectionMappingsPage = () => {
   const { streamsWithMappings, clear, submitMappings, hasMappingsChanged } = useMappingContext();
-  const { mode } = useConnectionFormService();
+  const { mode } = useFormMode();
   const { connectionUpdating } = useConnectionEditService();
   const { registerNotification } = useNotificationService();
   const { formatMessage } = useIntl();
@@ -71,13 +83,30 @@ const ConnectionMappingsPageContent = () => {
     <>
       <IfFeatureEnabled feature={FeatureItem.MappingsUI}>
         <FlexContainer direction="column">
-          <FlexContainer direction="row" justifyContent="space-between" alignItems="center">
-            <Heading as="h3" size="sm">
-              <FormattedMessage id="connections.mappings.title" />
-            </Heading>
+          <FlexContainer
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+            className={styles.pageTitleContainer}
+          >
+            <FlexItem grow>
+              <FlexContainer direction="row" alignItems="center" gap="md">
+                <Heading as="h3" size="sm">
+                  <FormattedMessage id="connections.mappings.title" />
+                </Heading>
+                <IfFeatureEnabled feature={FeatureItem.CloudForTeamsBranding}>
+                  <BrandingBadge product="cloudForTeams" testId="cloud-for-teams-badge-mappings" />
+                </IfFeatureEnabled>
+              </FlexContainer>
+            </FlexItem>
+            <ExternalLink href={links.connectionMappings}>
+              <Button variant="clear" icon="share" iconPosition="right" iconSize="sm">
+                <FormattedMessage id="connections.mappings.docsLink" />
+              </Button>
+            </ExternalLink>
             <FormChangeTracker formId="mapping-form" changed={hasMappingsChanged} />
             {showSubmissionButtons && (
-              <FlexContainer>
+              <>
                 <Button
                   variant="secondary"
                   onClick={clear}
@@ -93,7 +122,7 @@ const ConnectionMappingsPageContent = () => {
                 >
                   <FormattedMessage id="form.submit" />
                 </Button>
-              </FlexContainer>
+              </>
             )}
           </FlexContainer>
           {anyMappersConfigured ? <ConnectionMappingsList /> : <MappingsEmptyState />}

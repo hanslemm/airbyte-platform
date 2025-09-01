@@ -1,3 +1,4 @@
+import { WebStorageStateStore } from "oidc-client-ts";
 import { PropsWithChildren, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { AuthProvider, useAuth } from "react-oidc-context";
@@ -25,8 +26,9 @@ export const EnterpriseAuthService: React.FC<PropsWithChildren<unknown>> = ({ ch
   const oidcConfig = {
     authority: auth.authorizationServerUrl != null ? auth.authorizationServerUrl : "",
     client_id: auth.clientId,
-    redirect_uri: createUriWithoutSsoParams(true), // creates redirect uri and adds `checkLicense=true` query param to trigger Enterprise license check.
+    redirect_uri: createUriWithoutSsoParams(),
     scope: "openid profile email",
+    extraQueryParams: !!auth.audience ? { audience: auth.audience } : undefined,
     onSigninCallback: () => {
       // Remove OIDC params from URL, but don't remove other params that might be present
       const searchParams = new URLSearchParams(window.location.search);
@@ -38,6 +40,7 @@ export const EnterpriseAuthService: React.FC<PropsWithChildren<unknown>> = ({ ch
         : window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
     },
+    userStore: new WebStorageStateStore({ store: window.localStorage }),
   };
 
   return (

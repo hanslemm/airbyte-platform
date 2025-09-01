@@ -33,7 +33,7 @@ spec:
         {{- include "airbyte.tplvalues.render" (dict "value" .Values.worker.podAnnotations "context" $) | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: {{ .Values.global.serviceAccountName }}
+      serviceAccountName: {{ default .Values.global.serviceAccountName .Values.worker.serviceAccountName }}
       automountServiceAccountToken: true
       {{- if .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -64,11 +64,7 @@ spec:
           value: "-Xdebug -agentlib:jdwp=transport=dt_socket,address=0.0.0.0:{{ .Values.worker.debug.remoteDebugPort }},server=y,suspend=n"
         {{- end}}
 
-        {{- if (or (eq .Values.global.edition "community") (eq .Values.global.edition "pro") (eq .Values.global.edition "enterprise")) }}
-        - name: AIRBYTE_API_AUTH_HEADER_VALUE
-          value: "Internal worker"
-        {{- end }}
-
+        {{- include "airbyte.auth.jwt.envs" . | nindent 8 }}
         {{- include "airbyte.common.envs" . | nindent 8 }}
         {{- include "airbyte.database.envs" . | nindent 8 }}
         {{- include "airbyte.database.migrations.envs" . | nindent 8 }}
@@ -87,8 +83,27 @@ spec:
         {{- include "airbyte.workloads.resources.envs" . | nindent 8 }}
         {{- include "airbyte.workloadApiServer.envs" . | nindent 8 }}
 
+        {{- if .Values.global.datadog.enabled }}
+        {{- if (eq .Values.global.edition "cloud") }}
+        - name: DD_SERVICE 
+          value: airbyte-cloud-workers
+        {{- else }}
+        - name: DD_SERVICE 
+          value: {{ include "airbyte.componentNameWithAirbytePrefix" . }}
+        {{- end }}
+        {{- include "airbyte.datadog.envs" . | nindent 8 }}
+        {{- include "airbyte.otel.envs" . | nindent 8 }}
+        {{- end}}
+
         {{- if (eq .Values.global.edition "enterprise") }}
         {{- include "airbyte.enterprise.envs" . | nindent 8 }}
+        {{- end }}
+
+        {{- if (eq .Values.global.edition "cloud") }}
+        {{- include "airbyte.aws.envs" . | nindent 8 }}
+        {{- include "airbyte.featureFlags.envs" . | nindent 8 }}
+        {{- include "airbyte.temporal.cloud.envs" . | nindent 8 }}
+        {{- include "airbyte.temporal.cloud.credentials.envs" . | nindent 8 }}
         {{- end }}
 
         # Values from secret
@@ -184,8 +199,11 @@ spec:
         volumeMounts:
         {{- if eq (include "airbyte.storage.type" .) "gcs" }}
         - name: gcs-log-creds-volume
-          mountPath: {{ include "airbyte.storage.gcs.credentialsJsonPath" . }}
+          mountPath: {{ include "airbyte.storage.gcs.credentialsJsonPath" . | dir }}
           readOnly: true
+        {{- else if eq (lower (include "airbyte.storage.type" .)) "local" }}
+        - name: airbyte-storage
+          mountPath: /storage
         {{- end }}
         {{- if .Values.worker.extraVolumeMounts }}
 {{- toYaml .Values.worker.extraVolumeMounts | nindent 8 }}
@@ -204,10 +222,14 @@ spec:
       {{- if eq (include "airbyte.storage.type" .) "gcs" }}
       - name: gcs-log-creds-volume
         secret:
-          secretName: {{ include "airbyte.storage.secretName" }}
+          secretName: {{ include "airbyte.storage.secretName" . }}
           items:
             - key: {{ include "airbyte.storage.gcs.credentialsJson.secretKey" . }}
               path: "gcp.json"
+      {{- else if eq (lower (include "airbyte.storage.type" .)) "local" }}
+      - name: airbyte-storage
+        persistentVolumeClaim:
+          claimName: airbyte-storage-pvc
       {{- end }}
       {{- if .Values.worker.extraVolumes }}
 {{- toYaml .Values.worker.extraVolumes | nindent 6 }}

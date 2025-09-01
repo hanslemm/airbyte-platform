@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
-import * as yup from "yup";
+import { z } from "zod";
 
 import { Form, FormControl } from "components/forms";
 import { ModalFormSubmissionButtons } from "components/forms/ModalFormSubmissionButtons";
@@ -11,27 +11,22 @@ import { ModalBody, ModalFooter } from "components/ui/Modal";
 import { Text } from "components/ui/Text";
 
 import { useFormatError } from "core/errors";
-import { isCloudApp } from "core/utils/app";
+import { useIsCloudApp } from "core/utils/app";
 import { links } from "core/utils/links";
 
-interface ConnectorDefinition {
-  name: string;
-  documentationUrl: string;
-  dockerImageTag: string;
-  dockerRepository: string;
-}
+const validationSchema = z.object({
+  name: z.string().trim().nonempty("form.empty.error"),
+  documentationUrl: z.string().url("form.url.error").or(z.literal("")),
+  dockerImageTag: z.string().trim().nonempty("form.empty.error"),
+  dockerRepository: z.string().trim().nonempty("form.empty.error"),
+});
+
+type ConnectorDefinition = z.infer<typeof validationSchema>;
 
 export interface AddCustomDockerImageConnectorModalProps {
   onCancel: () => void;
   onSubmit: (sourceDefinition: ConnectorDefinition) => Promise<void>;
 }
-
-const validationSchema = yup.object().shape({
-  name: yup.string().trim().required("form.empty.error"),
-  documentationUrl: yup.string().trim().url("form.url.error").notRequired().default(""),
-  dockerImageTag: yup.string().trim().required("form.empty.error"),
-  dockerRepository: yup.string().trim().required("form.empty.error"),
-});
 
 const ConnectorControl = FormControl<ConnectorDefinition>;
 
@@ -42,7 +37,7 @@ export const AddCustomDockerImageConnectorModal: React.FC<AddCustomDockerImageCo
   const { formatMessage } = useIntl();
   const [error, setError] = useState<Error>();
   const formatError = useFormatError();
-
+  const isCloudApp = useIsCloudApp();
   return (
     <Form<ConnectorDefinition>
       defaultValues={{
@@ -51,7 +46,7 @@ export const AddCustomDockerImageConnectorModal: React.FC<AddCustomDockerImageCo
         dockerImageTag: "",
         dockerRepository: "",
       }}
-      schema={validationSchema}
+      zodSchema={validationSchema}
       onSubmit={async (values) => {
         setError(undefined);
         await onSubmit(values);
@@ -74,7 +69,7 @@ export const AddCustomDockerImageConnectorModal: React.FC<AddCustomDockerImageCo
           <ConnectorControl
             fieldType="input"
             name="dockerRepository"
-            label={formatMessage({ id: isCloudApp() ? "admin.dockerFullImageName" : "admin.dockerRepository" })}
+            label={formatMessage({ id: isCloudApp ? "admin.dockerFullImageName" : "admin.dockerRepository" })}
           />
           <ConnectorControl
             fieldType="input"

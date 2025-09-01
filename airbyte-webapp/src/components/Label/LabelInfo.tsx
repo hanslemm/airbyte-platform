@@ -1,16 +1,17 @@
-import { JSONSchema7Type } from "json-schema";
 import React from "react";
 import { FormattedMessage } from "react-intl";
 
+import { ExternalLink } from "components/ui/Link";
 import { TextWithHTML } from "components/ui/TextWithHTML";
 
 import styles from "./LabelInfo.module.scss";
 
 interface LabelInfoProps {
   label?: React.ReactNode;
-  examples?: JSONSchema7Type;
+  examples?: unknown;
   description?: string | React.ReactNode;
   options?: Array<{ title: string; description?: string }>;
+  docsLink?: string;
 }
 
 const Description: React.FC<Pick<LabelInfoProps, "label" | "description">> = ({ label, description }) => {
@@ -86,12 +87,20 @@ const Examples: React.FC<Pick<LabelInfoProps, "examples">> = ({ examples }) => {
   );
 };
 
-export const LabelInfo: React.FC<LabelInfoProps> = ({ label, examples, description, options }) => {
+export const LabelInfo: React.FC<LabelInfoProps> = ({ label, examples, description, options, docsLink }) => {
   return (
     <div className={styles.container}>
       <Description label={label} description={description} />
       <Options options={options} />
       <Examples examples={examples} />
+      {docsLink && (
+        <span>
+          <FormattedMessage
+            id="label.docsLink"
+            values={{ a: (node: React.ReactNode) => <ExternalLink href={docsLink}>{node}</ExternalLink> }}
+          />
+        </span>
+      )}
     </div>
   );
 };

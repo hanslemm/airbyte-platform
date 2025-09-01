@@ -33,6 +33,11 @@ micronaut:
     webhook:
       type: fixed
       n-threads: ${WEBHOOK_TASK_EXECUTOR_THREADS:3}
+  http:
+    client:
+      read-timeout: ${READ_TIMEOUT:10m}
+      max-content-length: 52428800 # 50MB
+      event-loop-group: http-client-event-loop
   metrics:
     enabled: ${MICROMETER_METRICS_ENABLED:false}
     binders:
@@ -59,20 +64,48 @@ micronaut:
         step: ${MICROMETER_METRICS_STEP:PT30S}
         host: ${STATSD_HOST:localhost}
         port: ${STATSD_PORT:8125}
+  netty:
+    event-loops:
+      http-client-event-loop:
+        num-threads: 10
+        prefer-native-transport: true
   security:
     authentication-provider-strategy: ALL
     enabled: ${API_AUTHORIZATION_ENABLED:false}
+    # these urls need to match the micronaut.router.static-resources, otherwise the webapp isn't going to work
+    intercept-url-map:
+      - pattern: /assets/**
+        access:
+          - isAnonymous()
+      - pattern: /fonts/**
+        access:
+          - isAnonymous()
+      - pattern: /*
+        access:
+          - isAnonymous()
     token:
       jwt:
+        enabled: ${API_AUTHORIZATION_ENABLED:false}
         signatures:
-          jwks:
-            oidc:
-              url: ${AB_AIRBYTE_AUTH_JWKS_ENDPOINT:}
           secret:
             generator:
-              secret: ${AB_AIRBYTE_AUTH_SECRET_SIGNING_KEY:}
-        enabled: ${AB_AIRBYTE_AUTH_TOKEN_ENABLED:false}
-      enabled: ${AB_AIRBYTE_AUTH_TOKEN_ENABLED:false}
+              secret: ${AB_JWT_SIGNATURE_SECRET:}
+  # These static resources are what allow the frontend code to work.
+  router:
+    static-resources:
+      assets:
+        mapping: /assets/**
+        paths:
+          - classpath:webapp/assets
+      fonts:
+        mapping: /fonts/**
+        paths:
+          - classpath:webapp/fonts
+      default:
+        mapping: /**
+        paths:
+          - classpath:webapp
+
   server:
     port: 8001
     cors:
@@ -97,17 +130,6 @@ micronaut:
       max-header-size: ${NETTY_MAX_HEADER_SIZE:32768}
     max-request-size: 10485760 # 10MB the micronaut default. If we want to bump, double check it works for nginx.
 
-  http:
-    client:
-      read-timeout: ${READ_TIMEOUT:10m}
-      max-content-length: 52428800 # 50MB
-      event-loop-group: http-client-event-loop
-  netty:
-    event-loops:
-      http-client-event-loop:
-        num-threads: 10
-        prefer-native-transport: true
-
 airbyte:
   airbyte-url: ${AIRBYTE_URL:}
   edition: ${AIRBYTE_EDITION:COMMUNITY}
@@ -117,25 +139,26 @@ airbyte:
   notification:
     customerio:
       apikey: ${CUSTOMERIO_API_KEY:}
-  applications:
-    type: ${AB_AIRBYTE_APPLICATIONS:}
   auth:
+    token-expiration:
+      application-token-expiration-in-minutes: ${AB_AIRBYTE_AUTH_TOKEN_EXPIRATION_APPLICATION:15}
+      dataplane-token-expiration-in-minutes: ${AB_AIRBYTE_AUTH_TOKEN_EXPIRATION_DATAPLANE:5}
+    token-issuer: ${WEBAPP_URL}
     initial-user:
       email: ${INITIAL_USER_EMAIL:}
       first-name: ${INITIAL_USER_FIRST_NAME:}
       last-name: ${INITIAL_USER_LAST_NAME:}
       password: ${INITIAL_USER_PASSWORD:}
     identity-provider:
-      type: ${IDENTITY_PROVIDER_TYPE:}
-      oidc:
-        client-id: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_ENDPOINTS_CLIENT_ID:}
-        endpoints:
-          authorization-server-endpoint: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_ENDPOINTS_AUTHORIZATION_SERVER_ENDPOINT:}
-        fields:
-          sub: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_FIELDS_SUB:sub}
-          email: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_FIELDS_EMAIL:email}
-          name: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_FIELDS_NAME:name}
-          issuer: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_FIELDS_ISSUER:iss}
+      verify-issuer: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_VERIFY_ISSUER:false}
+      verify-audience: ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_VERIFY_AUDIENCE:false}
+      issuers:
+        - ${WEBAPP_URL}
+        - ${DEFAULT_REALM}
+        - ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_ISSUER:}
+      audiences:
+        - ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_AUDIENCE:airbyte-server}
+        - ${AB_AIRBYTE_AUTH_IDENTITY_PROVIDER_OIDC_AUDIENCE:}
   cloud:
     storage:
       type: ${STORAGE_TYPE}
@@ -160,6 +183,11 @@ airbyte:
   connector:
     specific-resource-defaults-enabled: ${CONNECTOR_SPECIFIC_RESOURCE_DEFAULTS_ENABLED:false}
     datadog-support-names: ${CONNECTOR_DATADOG_SUPPORT_NAMES:}
+  connector-builder-server:
+    github:
+      airbyte-pat-token: ${BUILDER_GITHUB_AIRBYTE_PAT_TOKEN:}
+    ai-assist:
+      url-base: ${AI_ASSIST_URL_BASE:}
   connector-registry:
     remote:
       base-url: ${CONNECTOR_REGISTRY_BASE_URL:}
@@ -184,6 +212,10 @@ airbyte:
     path: ${FEATURE_FLAG_PATH:/flags}
     api-key: ${LAUNCHDARKLY_KEY:}
     base-url: ${FEATURE_FLAG_BASEURL:}
+  entitlement:
+    client: ${ENTITLEMENT_CLIENT:}
+    stigg:
+      api-key: ${STIGG_API_KEY:}
   flyway:
     configs:
       initialization-timeout-ms: ${CONFIGS_DATABASE_INITIALIZATION_TIMEOUT_MS:60000}
@@ -204,6 +236,7 @@ airbyte:
       gcp:
         credentials: ${SECRET_STORE_GCP_CREDENTIALS:}
         project-id: ${SECRET_STORE_GCP_PROJECT_ID:}
+        region: ${SECRET_STORE_GCP_REGION:}
       vault:
         address: ${VAULT_ADDRESS:}
         prefix: ${VAULT_PREFIX:}
@@ -219,6 +252,8 @@ airbyte:
     strategy: ${TRACKING_STRATEGY:LOGGING}
     write-key: ${SEGMENT_WRITE_KEY:}
   worker:
+    discover:
+      auto-refresh-window: ${DISCOVER_REFRESH_WINDOW_MINUTES:1440}
     kube-job-config-variant-override: ${JOB_RESOURCE_VARIANT_OVERRIDE:}
     kube-job-configs:
       default:
@@ -357,6 +392,20 @@ airbyte:
   temporal:
   web-app:
     url: ${WEBAPP_URL:}
+    datadog_application_id: ${WEBAPP_DATADOG_APPLICATION_ID:}
+    datadog_client_token: ${WEBAPP_DATADOG_CLIENT_TOKEN:}
+    datadog_env: ${WEBAPP_DATADOG_ENV:}
+    datadog_service: ${WEBAPP_DATADOG_SERVICE:}
+    datadog_site: ${WEBAPP_DATADOG_SITE:}
+    hockeystack_api_key: ${WEBAPP_HOCKEYSTACK_API_KEY:}
+    launchdarkly_key: ${WEBAPP_LAUNCHDARKLY_KEY:}
+    osano_key: ${WEBAPP_OSANO_KEY:}
+    segment_token: ${WEBAPP_SEGMENT_TOKEN:}
+    sonar_api_url: ${WEBAPP_SONAR_API_URL:}
+    zendesk_key: ${WEBAPP_ZENDESK_KEY:}
+    posthog_api_key: ${WEBAPP_POSTHOG_API_KEY:}
+    posthog_host: ${WEBAPP_POSTHOG_HOST:}
+
   workspace:
     root: ${WORKSPACE_ROOT}
   protocol:
@@ -386,12 +435,15 @@ airbyte:
 
   connector-builder-server-api:
     base-path: ${CONNECTOR_BUILDER_SERVER_API_HOST:}
+    signature-secret: ${AB_JWT_SIGNATURE_SECRET:}
     connect-timeout-seconds: ${CONNECTOR_BUILDER_SERVER_API_CONNECT_TIMEOUT_SECONDS:30}
     read-timeout-seconds: ${CONNECTOR_BUILDER_SERVER_API_READ_TIMEOUT_SECONDS:300}
-  internal-api:
-    auth-header:
-      name: ${AIRBYTE_API_AUTH_HEADER_NAME:}
-      value: ${AIRBYTE_API_AUTH_HEADER_VALUE:}
+
+  manifest-server-api:
+    base-path: ${MANIFEST_SERVER_API_HOST:}
+    signature-secret: ${AB_JWT_SIGNATURE_SECRET:}
+    connect-timeout-seconds: ${MANIFEST_SERVER_API_CONNECT_TIMEOUT_SECONDS:30}
+    read-timeout-seconds: ${MANIFEST_SERVER_API_READ_TIMEOUT_SECONDS:300}
 
   # Enterprise feature
   audit:
@@ -428,8 +480,9 @@ datasources:
     url: ${DATABASE_URL}
     driverClassName: org.postgresql.Driver
     username: ${DATABASE_USER}
-    password: ${DATABASE_PASSWORD}
+    password: ${DATABASE_PASSWORD:}
     leak-detection-threshold: 40000 # This should be slightly higher than the connection-timeout setting but not too high to avoid false positives and negatives.
+    max-lifetime: 600000
   local-secrets:
     connection-test-query: SELECT 1
     connection-timeout: 30000
@@ -440,7 +493,7 @@ datasources:
     url: ${DATABASE_URL}
     driverClassName: org.postgresql.Driver
     username: ${DATABASE_USER}
-    password: ${DATABASE_PASSWORD}
+    password: ${DATABASE_PASSWORD:}
     pool-name: config-pool
 
 endpoints:

@@ -1,19 +1,19 @@
 import { useCallback, useMemo, useState } from "react";
 import { useIntl } from "react-intl";
 
-import { useCurrentWorkspaceLink } from "area/workspace/utils";
-import { useCurrentWorkspace, useGetCustomerPortalUrl } from "core/api";
+import { useCurrentOrganizationId } from "area/organization/utils/useCurrentOrganizationId";
+import { useGetCustomerPortalUrl } from "core/api";
 import { CustomerPortalRequestBodyFlow } from "core/api/types/AirbyteClient";
 import { trackError } from "core/utils/datadog";
 import { useNotificationService } from "hooks/services/Notification";
-import { CloudSettingsRoutePaths } from "packages/cloud/views/settings/routePaths";
-import { RoutePaths } from "pages/routePaths";
+
+import { useLinkToBillingPage } from "./useLinkToBillingPage";
 
 export const useRedirectToCustomerPortal = (flow: CustomerPortalRequestBodyFlow) => {
   const [redirecting, setRedirecting] = useState(false);
-  const { organizationId } = useCurrentWorkspace();
-  const createLink = useCurrentWorkspaceLink();
-  const pathToBilling = createLink(`/${RoutePaths.Settings}/${CloudSettingsRoutePaths.Billing}`);
+  const organizationId = useCurrentOrganizationId();
+  const pathToBilling = useLinkToBillingPage();
+
   const { mutateAsync: getCustomerPortalUrl, isLoading: isCustomerPortalUrlLoading } = useGetCustomerPortalUrl();
   const { registerNotification, unregisterNotificationById } = useNotificationService();
   const { formatMessage } = useIntl();

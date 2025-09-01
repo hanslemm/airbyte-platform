@@ -31,6 +31,10 @@ const mockMapper: StreamMapperWithId<RowFilteringMapperConfiguration> = {
 
 jest.mock("core/utils/rbac", () => ({
   useIntent: () => true,
+  useGeneratedIntent: () => true,
+  Intent: {
+    CreateOrEditConnection: "CreateOrEditConnection",
+  },
 }));
 
 jest.mock("../useGetFieldsInStream", () => ({
@@ -47,8 +51,8 @@ jest.mock("core/api", () => ({
   useCurrentWorkspace: () => ({}),
 }));
 
-jest.mock("hooks/services/ConnectionForm/ConnectionFormService", () => ({
-  useConnectionFormService: () => ({
+jest.mock("core/services/ui/FormModeContext", () => ({
+  useFormMode: () => ({
     mode: "edit",
   }),
 }));

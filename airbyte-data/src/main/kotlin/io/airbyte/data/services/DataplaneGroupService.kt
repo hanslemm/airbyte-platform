@@ -4,6 +4,7 @@
 
 package io.airbyte.data.services
 
+import io.airbyte.config.Configs.AirbyteEdition
 import io.airbyte.config.DataplaneGroup
 import java.util.UUID
 
@@ -14,6 +15,14 @@ interface DataplaneGroupService {
   fun getDataplaneGroup(id: UUID): DataplaneGroup
 
   /**
+   * Get the dataplane group by organization ID and name.
+   */
+  fun getDataplaneGroupByOrganizationIdAndName(
+    organizationId: UUID,
+    name: String,
+  ): DataplaneGroup
+
+  /**
    * Write (create or update) a dataplane group.
    */
   fun writeDataplaneGroup(dataplaneGroup: DataplaneGroup): DataplaneGroup
@@ -22,7 +31,14 @@ interface DataplaneGroupService {
    * List all dataplane groups matching the provided organization ID
    */
   fun listDataplaneGroups(
-    organizationId: UUID,
+    organizationIds: List<UUID>,
     withTombstone: Boolean,
   ): List<DataplaneGroup>
+
+  /**
+   * Get the default dataplane group
+   */
+  fun getDefaultDataplaneGroupForAirbyteEdition(airbyteEdition: AirbyteEdition): DataplaneGroup
+
+  fun getOrganizationIdFromDataplaneGroup(dataplaneGroupId: UUID): UUID
 }

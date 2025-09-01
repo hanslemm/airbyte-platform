@@ -1,5 +1,5 @@
 import classNames from "classnames";
-import React, { ReactNode, useCallback, useImperativeHandle, useRef, useState } from "react";
+import React, { ReactNode, useCallback, useImperativeHandle, useRef } from "react";
 import { useIntl } from "react-intl";
 import { useToggle } from "react-use";
 
@@ -13,21 +13,20 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   containerClassName?: string;
   adornment?: ReactNode;
   "data-testid"?: string;
+  icon?: ReactNode;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ light, error, inline, containerClassName, adornment, "data-testid": testId, ...props }, ref) => {
+  ({ light, error, icon, inline, containerClassName, adornment, "data-testid": testId, ...props }, ref) => {
     const { formatMessage } = useIntl();
 
     const inputRef = useRef<HTMLInputElement | null>(null);
-    const buttonRef = useRef<HTMLButtonElement | null>(null);
     const inputSelectionStartRef = useRef<number | null>(null);
 
     // Necessary to bind a ref passed from the parent in to our internal inputRef
     useImperativeHandle(ref, () => inputRef.current as HTMLInputElement, []);
 
     const [isContentVisible, toggleIsContentVisible] = useToggle(false);
-    const [focused, setFocused] = useState(false);
 
     const isPassword = props.type === "password";
     const isVisibilityButtonVisible = isPassword && !props.disabled;
@@ -42,34 +41,25 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       const selectionStart = inputSelectionStartRef.current ?? inputRef.current?.value.length;
 
       element?.focus();
-
       if (selectionStart) {
-        // Update input cursor position to where it was before
-        window.setTimeout(() => {
+        // In Chromium, .focus() is not synchronous. Requesting the next frame fixes this.
+        requestAnimationFrame(() => {
           element?.setSelectionRange(selectionStart, selectionStart);
-        }, 0);
+        });
       }
     }, [inputRef]);
 
-    const onContainerFocus: React.FocusEventHandler<HTMLDivElement> = () => {
-      setFocused(true);
-    };
-
     const onContainerBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
-      if (isVisibilityButtonVisible && event.target === inputRef.current) {
-        // Save the previous selection
-        inputSelectionStartRef.current = inputRef.current?.selectionStart;
-      }
-
-      setFocused(false);
-
-      if (isPassword) {
-        window.setTimeout(() => {
-          if (document.activeElement !== inputRef.current && document.activeElement !== buttonRef.current) {
-            toggleIsContentVisible(false);
-            inputSelectionStartRef.current = null;
-          }
-        }, 0);
+      // event.relatedTarget holds the new element that is gaining focus (or null, if focus is being lost by e.g.
+      // clicking on a non-focusable element). This check tells us if the user clicked on the visibility button, in
+      // which case we want to toggle visibliity but retain the cursor position.
+      if (!event.currentTarget.contains(event.relatedTarget)) {
+        inputSelectionStartRef.current = null;
+        if (isVisibilityButtonVisible) {
+          toggleIsContentVisible(false);
+        }
+      } else {
+        inputSelectionStartRef.current = inputRef.current?.selectionStart ?? null;
       }
     };
 
@@ -78,15 +68,14 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         className={classNames(containerClassName, styles.container, {
           [styles.disabled]: props.disabled,
           [styles.readOnly]: props.readOnly,
-          [styles.focused]: focused,
           [styles.light]: light,
           [styles.inline]: inline,
           [styles.error]: error,
         })}
         data-testid="input-container"
-        onFocus={onContainerFocus}
         onBlur={onContainerBlur}
       >
+        {icon && <span className={styles.icon}>{icon}</span>}
         <input
           aria-invalid={error}
           data-testid={testId ?? "input"}
@@ -100,6 +89,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               [styles.readOnly]: props.readOnly,
               [styles.password]: isPassword,
               "fs-exclude": isPassword,
+              [styles["input--hasIcon"]]: !!icon,
             },
             props.className
           )}
@@ -107,7 +97,6 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         {adornment}
         {isVisibilityButtonVisible ? (
           <Button
-            ref={buttonRef}
             className={styles.visibilityButton}
             onClick={() => {
               toggleIsContentVisible();

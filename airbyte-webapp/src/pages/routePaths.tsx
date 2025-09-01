@@ -8,6 +8,10 @@ export enum RoutePaths {
   Source = "source",
   Settings = "settings",
   ConnectorBuilder = "connector-builder",
+  EmbeddedWidget = "embedded-widget",
+  EmbeddedOnboarding = "embedded",
+  Organization = "organization",
+  Onboarding = "onboarding",
 }
 
 export enum DestinationPaths {
@@ -33,6 +37,7 @@ export const enum ConnectionRoutePaths {
   JobHistory = "job-history", // deprecated, used to support legacy logs links
   ConnectionNew = "new-connection",
   Configure = "configure",
+  ConfigureDataActivation = "configure-da",
   ConfigureContinued = "continued",
   Timeline = "timeline",
   Mappings = "mappings",
@@ -53,4 +58,6 @@ export enum SettingsRoutePaths {
   WorkspaceMembers = "workspaceMembers",
   Applications = "applications",
   License = "license",
+  User = "user",
+  Embedded = "embedded",
 }

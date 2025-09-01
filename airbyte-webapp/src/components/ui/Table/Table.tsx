@@ -8,10 +8,12 @@ import {
   getCoreRowModel,
   ColumnFiltersState,
   getFilteredRowModel,
+  SortingState,
+  OnChangeFn,
 } from "@tanstack/react-table";
 import classNames from "classnames";
-import React, { PropsWithChildren, useMemo } from "react";
-import { FormattedMessage } from "react-intl";
+import React, { PropsWithChildren, useMemo, useState } from "react";
+import { FormattedMessage, useIntl } from "react-intl";
 import { TableVirtuoso, TableComponents, ItemProps } from "react-virtuoso";
 
 import { Text } from "components/ui/Text";
@@ -36,10 +38,14 @@ export interface TableProps<T> {
   testId?: string;
   columnVisibility?: VisibilityState;
   columnFilters?: ColumnFiltersState;
+  manualSorting?: boolean;
+  onSortingChange?: OnChangeFn<SortingState>;
   sorting?: boolean;
   stickyHeaders?: boolean;
   getRowClassName?: (data: T) => string | undefined;
   initialSortBy?: Array<{ id: string; desc: boolean }>;
+  showTableToggle?: boolean;
+  initialExpandedRows?: number;
   /**
    * If true, the table will be rendered using react-virtuoso. Defaults to false.
    */
@@ -55,6 +61,8 @@ export interface TableProps<T> {
    * Custom placeholder to be shown when the table is empty. Defaults to a simple "No data" message.
    */
   customEmptyPlaceholder?: React.ReactElement;
+  sortingState?: SortingState;
+  showEmptyPlaceholder?: boolean;
 }
 
 export const Table = <T,>({
@@ -71,11 +79,17 @@ export const Table = <T,>({
   columnFilters,
   getRowClassName,
   stickyHeaders = true,
+  manualSorting = false,
+  onSortingChange,
   sorting = true,
   initialSortBy,
   virtualized = false,
   virtualizedProps,
   customEmptyPlaceholder,
+  showTableToggle = false,
+  initialExpandedRows = 6,
+  sortingState,
+  showEmptyPlaceholder = true,
 }: PropsWithChildren<TableProps<T>>) => {
   const table = useReactTable({
     columns,
@@ -84,8 +98,13 @@ export const Table = <T,>({
       columnVisibility,
       sorting: initialSortBy,
     },
+    manualSorting,
+    // Setting onSortingChange to undefined will effectively disable sorting
+    ...(onSortingChange !== undefined ? { onSortingChange } : {}),
     state: {
       columnFilters,
+      // Setting sortingState to undefined will effectively disable sorting
+      ...(sortingState !== undefined ? { sorting: sortingState } : {}),
     },
     getCoreRowModel: getCoreRowModel<T>(),
     getSortedRowModel: getSortedRowModel<T>(),
@@ -119,7 +138,11 @@ export const Table = <T,>({
   );
 
   const TableHead: TableComponents["TableHead"] = React.forwardRef(({ style, ...restProps }, ref) => (
-    <thead ref={ref} className={classNames({ [styles["thead--sticky"]]: stickyHeaders })} {...restProps} />
+    <thead
+      ref={ref}
+      className={classNames(styles.thead, { [styles["thead--sticky"]]: stickyHeaders })}
+      {...restProps}
+    />
   ));
   TableHead.displayName = "TableHead";
 
@@ -237,12 +260,15 @@ export const Table = <T,>({
     </tbody>
   );
 
+  const [isExpanded, setIsExpanded] = useState(false);
+  const { formatMessage } = useIntl();
+
   return virtualized ? (
     <TableVirtuoso<T>
       // the parent container should have exact height to make "AutoSizer" work properly
       style={{
         height: "100%",
-        minHeight: 100, // for empty state placeholder
+        minHeight: showEmptyPlaceholder ? 100 : undefined, // for empty state placeholder
       }}
       totalCount={rows.length}
       {...virtualizedProps}
@@ -250,7 +276,7 @@ export const Table = <T,>({
         Table,
         TableHead,
         TableRow: TableRowVirtualized,
-        EmptyPlaceholder,
+        EmptyPlaceholder: showEmptyPlaceholder ? EmptyPlaceholder : undefined,
       }}
       fixedHeaderContent={headerContent}
     />
@@ -261,15 +287,30 @@ export const Table = <T,>({
       })}
       data-testid={testId}
     >
-      <thead className={classNames({ [styles["thead--sticky"]]: stickyHeaders })}>{headerContent()}</thead>
+      <thead className={classNames(styles.thead, { [styles["thead--sticky"]]: stickyHeaders })}>
+        {headerContent()}
+      </thead>
       {rows.length === 0 ? (
-        <EmptyPlaceholder />
+        showEmptyPlaceholder ? (
+          <EmptyPlaceholder />
+        ) : null
       ) : (
-        <tbody>
-          {rows.map((row) => (
-            <TableRow key={`table-row-${row.id}`} row={row} />
-          ))}
+        <tbody className={styles.tbody}>
+          {!showTableToggle || isExpanded
+            ? rows.map((row) => <TableRow key={`table-row-${row.id}`} row={row} />)
+            : rows.slice(0, initialExpandedRows).map((row) => <TableRow key={`table-row-${row.id}`} row={row} />)}
         </tbody>
+      )}
+      {showTableToggle && rows.length > initialExpandedRows && (
+        <button
+          type="button"
+          className={styles.viewMoreButton}
+          onClick={() => {
+            setIsExpanded((prev) => !prev);
+          }}
+        >
+          {formatMessage({ id: isExpanded ? "tables.viewLess" : "tables.viewMore" })}
+        </button>
       )}
     </table>
   );

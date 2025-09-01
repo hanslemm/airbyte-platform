@@ -1,6 +1,7 @@
 import isString from "lodash/isString";
 import { useMemo } from "react";
 
+import { convertToConnectorDefinitionWithMetrics } from "components/connector/ConnectorQualityMetrics";
 import { FlexContainer } from "components/ui/Flex";
 
 import { ConnectorDefinitionOrEnterpriseStub } from "core/domain/connector";
@@ -19,7 +20,7 @@ interface ConnectorListProps {
   noSearchResultsContent: React.ReactNode;
   suggestedConnectorDefinitionIds?: string[];
   onConnectorButtonClick: (definition: ConnectorDefinitionOrEnterpriseStub) => void;
-  onOpenRequestConnectorModal: () => void;
+  onOpenRequestConnectorModal?: () => void;
   showConnectorBuilderButton?: boolean;
 }
 
@@ -77,7 +78,7 @@ export const ConnectorList: React.FC<ConnectorListProps> = ({
           })}
 
           {showConnectorBuilderButton && <BuilderConnectorButton layout="vertical" />}
-          <RequestNewConnectorButton onClick={onOpenRequestConnectorModal} />
+          {!!onOpenRequestConnectorModal && <RequestNewConnectorButton onClick={onOpenRequestConnectorModal} />}
         </div>
       ) : (
         <FlexContainer className={styles.connectorList} direction="column" gap="sm">
@@ -103,7 +104,9 @@ export const ConnectorList: React.FC<ConnectorListProps> = ({
           {showConnectorBuilderButton && (
             <BuilderConnectorButton className={styles.connectorListButton} layout="horizontal" />
           )}
-          <RequestNewConnectorButton className={styles.connectorListButton} onClick={onOpenRequestConnectorModal} />
+          {!!onOpenRequestConnectorModal && (
+            <RequestNewConnectorButton className={styles.connectorListButton} onClick={onOpenRequestConnectorModal} />
+          )}
         </FlexContainer>
       )}
     </FlexContainer>
@@ -120,10 +123,12 @@ const getNumericMetric = (
     return 1;
   }
 
+  const connectorDefinitionWithMetrics = convertToConnectorDefinitionWithMetrics(connectorDefinition);
+
   const rawMetricValue =
     metric === "successRate"
-      ? connectorDefinition.metrics?.all?.sync_success_rate
-      : connectorDefinition.metrics?.all?.usage;
+      ? connectorDefinitionWithMetrics.metrics?.all?.sync_success_rate
+      : connectorDefinitionWithMetrics.metrics?.all?.usage;
 
   if (!isString(rawMetricValue)) {
     return 1;

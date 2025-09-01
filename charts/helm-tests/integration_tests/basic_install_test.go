@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/airbytehq/airbyte-platform-internal/oss/charts/helm-tests/tests"
+	"github.com/airbytehq/airbyte-platform-internal/oss/charts/helm-tests/tests/v1"
 	"github.com/gruntwork-io/terratest/modules/helm"
 	"github.com/gruntwork-io/terratest/modules/k8s"
 	"github.com/gruntwork-io/terratest/modules/logger"
@@ -110,9 +110,6 @@ func TestBasicEnterpriseInstallWithDefaultValues(t *testing.T) {
 	t.Run("should install successfully with airbyte.yml as a file", func(t *testing.T) {
 		opts := tests.BaseHelmOptions()
 		opts.SetValues["global.edition"] = "enterprise"
-		opts.SetFiles = map[string]string{
-			"global.airbyteYml": "../tests/fixtures/airbyte.yaml",
-		}
 		opts.KubectlOptions = &k8s.KubectlOptions{
 			Namespace: releaseNamespace,
 		}

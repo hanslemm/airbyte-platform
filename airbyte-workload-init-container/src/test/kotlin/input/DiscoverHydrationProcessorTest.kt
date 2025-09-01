@@ -6,18 +6,18 @@ package io.airbyte.initContainer.input
 
 import io.airbyte.commons.json.Jsons
 import io.airbyte.config.StandardDiscoverCatalogInput
+import io.airbyte.config.WorkloadType
+import io.airbyte.initContainer.hydration.DiscoverCatalogInputHydrator
+import io.airbyte.initContainer.serde.ObjectSerializer
 import io.airbyte.initContainer.system.FileClient
 import io.airbyte.metrics.MetricClient
 import io.airbyte.persistence.job.models.IntegrationLauncherConfig
 import io.airbyte.persistence.job.models.JobRunConfig
-import io.airbyte.workers.DiscoverCatalogInputHydrator
 import io.airbyte.workers.models.DiscoverCatalogInput
 import io.airbyte.workers.models.SidecarInput
 import io.airbyte.workers.pod.FileConstants
-import io.airbyte.workers.serde.ObjectSerializer
 import io.airbyte.workers.serde.PayloadDeserializer
-import io.airbyte.workload.api.client.model.generated.Workload
-import io.airbyte.workload.api.client.model.generated.WorkloadType
+import io.airbyte.workload.api.domain.Workload
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
@@ -108,13 +108,12 @@ class DiscoverHydrationProcessorTest {
 
     val workload =
       Workload(
-        WORKLOAD_ID,
-        listOf(),
-        "inputPayload",
-        "logPath",
-        "geography",
-        WorkloadType.DISCOVER,
-        UUID.randomUUID(),
+        id = WORKLOAD_ID,
+        labels = mutableListOf(),
+        inputPayload = "inputPayload",
+        logPath = "logPath",
+        type = WorkloadType.DISCOVER,
+        autoId = UUID.randomUUID(),
       )
   }
 }

@@ -6,12 +6,13 @@ package io.airbyte.workload.launcher.pods
 
 import com.google.common.annotations.VisibleForTesting
 import datadog.trace.api.Trace
+import io.airbyte.commons.annotation.InternalForTesting
 import io.airbyte.commons.constants.WorkerConstants.KubeConstants.FULL_POD_TIMEOUT
 import io.airbyte.featureflag.Connection
 import io.airbyte.featureflag.EnableAsyncProfiler
 import io.airbyte.featureflag.FeatureFlagClient
+import io.airbyte.featureflag.ProfilingMode
 import io.airbyte.metrics.lib.ApmTraceUtils
-import io.airbyte.persistence.job.models.ReplicationInput
 import io.airbyte.workers.exception.KubeClientException
 import io.airbyte.workers.exception.KubeCommandType
 import io.airbyte.workers.exception.PodType
@@ -19,10 +20,11 @@ import io.airbyte.workers.exception.ResourceConstraintException
 import io.airbyte.workers.models.CheckConnectionInput
 import io.airbyte.workers.models.DiscoverCatalogInput
 import io.airbyte.workers.models.SpecInput
-import io.airbyte.workers.pod.PodLabeler
+import io.airbyte.workload.launcher.ArchitectureDecider
 import io.airbyte.workload.launcher.metrics.MeterFilterFactory.Companion.LAUNCH_REPLICATION_OPERATION_NAME
 import io.airbyte.workload.launcher.metrics.MeterFilterFactory.Companion.LAUNCH_RESET_OPERATION_NAME
 import io.airbyte.workload.launcher.pipeline.consumer.LauncherInput
+import io.airbyte.workload.launcher.pipeline.stages.model.SyncPayload
 import io.airbyte.workload.launcher.pods.factories.ConnectorPodFactory
 import io.airbyte.workload.launcher.pods.factories.ReplicationPodFactory
 import io.fabric8.kubernetes.api.model.Pod
@@ -55,56 +57,59 @@ class KubePodClient(
 
   @Trace(operationName = LAUNCH_REPLICATION_OPERATION_NAME)
   fun launchReplication(
-    replicationInput: ReplicationInput,
+    payload: SyncPayload,
     launcherInput: LauncherInput,
   ) {
+    val replicationInput = payload.input
     val sharedLabels =
       labeler.getSharedLabels(
-        launcherInput.workloadId,
-        launcherInput.mutexKey,
-        launcherInput.labels,
-        launcherInput.autoId,
-        replicationInput.workspaceId,
-        replicationInput.networkSecurityTokens,
+        workloadId = launcherInput.workloadId,
+        mutexKey = launcherInput.mutexKey,
+        passThroughLabels = launcherInput.labels,
+        autoId = launcherInput.autoId,
+        workspaceId = replicationInput.workspaceId,
+        networkSecurityTokens = replicationInput.networkSecurityTokens,
       )
 
-    val kubeInput = mapper.toKubeInput(launcherInput.workloadId, replicationInput, sharedLabels)
+    val kubeInput = mapper.toKubeInput(launcherInput.workloadId, payload, sharedLabels)
     val enableAsyncProfiler = featureFlagClient.boolVariation(EnableAsyncProfiler, Connection(replicationInput.connectionId))
+    val profilingMode = featureFlagClient.stringVariation(ProfilingMode, Connection(replicationInput.connectionId))
     var pod =
       replicationPodFactory.create(
-        kubeInput.podName,
-        kubeInput.labels,
-        kubeInput.annotations,
-        kubeInput.nodeSelectors,
-        kubeInput.orchestratorImage,
-        kubeInput.sourceImage,
-        kubeInput.destinationImage,
-        kubeInput.orchestratorReqs,
-        kubeInput.sourceReqs,
-        kubeInput.destinationReqs,
-        kubeInput.orchestratorRuntimeEnvVars,
-        kubeInput.sourceRuntimeEnvVars,
-        kubeInput.destinationRuntimeEnvVars,
-        replicationInput.useFileTransfer,
-        replicationInput.workspaceId,
-        enableAsyncProfiler,
+        podName = kubeInput.podName,
+        allLabels = kubeInput.labels,
+        annotations = kubeInput.annotations,
+        nodeSelectors = kubeInput.nodeSelectors,
+        orchImage = kubeInput.orchestratorImage,
+        sourceImage = kubeInput.sourceImage,
+        destImage = kubeInput.destinationImage,
+        orchResourceReqs = kubeInput.orchestratorReqs,
+        sourceResourceReqs = kubeInput.sourceReqs,
+        destResourceReqs = kubeInput.destinationReqs,
+        orchRuntimeEnvVars = kubeInput.orchestratorRuntimeEnvVars,
+        sourceRuntimeEnvVars = kubeInput.sourceRuntimeEnvVars,
+        destRuntimeEnvVars = kubeInput.destinationRuntimeEnvVars,
+        isFileTransfer = replicationInput.useFileTransfer,
+        workspaceId = replicationInput.workspaceId,
+        enableAsyncProfiler = enableAsyncProfiler,
+        profilingMode = profilingMode,
+        architectureEnvironmentVariables = payload.architectureEnvironmentVariables ?: ArchitectureDecider.buildLegacyEnvironment(),
       )
 
-    logger.info { "Launching replication pod: ${kubeInput.podName} with containers:" }
+    logger.info { "Launching replication pod: ${kubeInput.podName} (selectors = ${kubeInput.nodeSelectors}) with containers:" }
     logger.info { "[source] image: ${kubeInput.sourceImage} resources: ${kubeInput.sourceReqs}" }
     logger.info { "[destination] image: ${kubeInput.destinationImage} resources: ${kubeInput.destinationReqs}" }
     logger.info { "[orchestrator] image: ${kubeInput.orchestratorImage} resources: ${kubeInput.orchestratorReqs}" }
 
     try {
-      pod =
-        kubePodLauncher.create(pod)
+      pod = kubePodLauncher.create(pod)
     } catch (e: RuntimeException) {
       ApmTraceUtils.addExceptionToTrace(e)
       throw KubeClientException(
-        "Failed to create pod ${kubeInput.podName}.",
-        e,
-        KubeCommandType.CREATE,
-        PodType.REPLICATION,
+        message = "Failed to create pod ${kubeInput.podName}.",
+        cause = e,
+        commandType = KubeCommandType.CREATE,
+        podType = PodType.REPLICATION,
       )
     }
 
@@ -116,50 +121,51 @@ class KubePodClient(
 
   @Trace(operationName = LAUNCH_RESET_OPERATION_NAME)
   fun launchReset(
-    replicationInput: ReplicationInput,
+    payload: SyncPayload,
     launcherInput: LauncherInput,
   ) {
+    val replicationInput = payload.input
     val sharedLabels =
       labeler.getSharedLabels(
-        launcherInput.workloadId,
-        launcherInput.mutexKey,
-        launcherInput.labels,
-        launcherInput.autoId,
-        replicationInput.workspaceId,
-        replicationInput.networkSecurityTokens,
+        workloadId = launcherInput.workloadId,
+        mutexKey = launcherInput.mutexKey,
+        passThroughLabels = launcherInput.labels,
+        autoId = launcherInput.autoId,
+        workspaceId = replicationInput.workspaceId,
+        networkSecurityTokens = replicationInput.networkSecurityTokens,
       )
-    val kubeInput = mapper.toKubeInput(launcherInput.workloadId, replicationInput, sharedLabels)
+    val kubeInput = mapper.toKubeInput(launcherInput.workloadId, payload, sharedLabels)
 
     var pod =
       replicationPodFactory.createReset(
-        kubeInput.podName,
-        kubeInput.labels,
-        kubeInput.annotations,
-        kubeInput.nodeSelectors,
-        kubeInput.orchestratorImage,
-        kubeInput.destinationImage,
-        kubeInput.orchestratorReqs,
-        kubeInput.destinationReqs,
-        kubeInput.orchestratorRuntimeEnvVars,
-        kubeInput.destinationRuntimeEnvVars,
-        replicationInput.useFileTransfer,
-        replicationInput.workspaceId,
+        podName = kubeInput.podName,
+        allLabels = kubeInput.labels,
+        annotations = kubeInput.annotations,
+        nodeSelectors = kubeInput.nodeSelectors,
+        orchImage = kubeInput.orchestratorImage,
+        destImage = kubeInput.destinationImage,
+        orchResourceReqs = kubeInput.orchestratorReqs,
+        destResourceReqs = kubeInput.destinationReqs,
+        orchRuntimeEnvVars = kubeInput.orchestratorRuntimeEnvVars,
+        destRuntimeEnvVars = kubeInput.destinationRuntimeEnvVars,
+        isFileTransfer = replicationInput.useFileTransfer,
+        workspaceId = replicationInput.workspaceId,
+        architectureEnvironmentVariables = payload.architectureEnvironmentVariables ?: ArchitectureDecider.buildLegacyEnvironment(),
       )
 
-    logger.info { "Launching reset pod: ${kubeInput.podName} with containers:" }
+    logger.info { "Launching reset pod: ${kubeInput.podName} (selectors = ${kubeInput.nodeSelectors}) with containers:" }
     logger.info { "[destination] image: ${kubeInput.destinationImage} resources: ${kubeInput.destinationReqs}" }
     logger.info { "[orchestrator] image: ${kubeInput.orchestratorImage} resources: ${kubeInput.orchestratorReqs}" }
 
     try {
-      pod =
-        kubePodLauncher.create(pod)
+      pod = kubePodLauncher.create(pod)
     } catch (e: RuntimeException) {
       ApmTraceUtils.addExceptionToTrace(e)
       throw KubeClientException(
-        "Failed to create pod ${kubeInput.podName}.",
-        e,
-        KubeCommandType.CREATE,
-        PodType.RESET,
+        message = "Failed to create pod ${kubeInput.podName}.",
+        cause = e,
+        commandType = KubeCommandType.CREATE,
+        podType = PodType.RESET,
       )
     }
 
@@ -228,31 +234,31 @@ class KubePodClient(
     launchConnectorWithSidecar(kubeInput, specPodFactory, launcherInput.workloadType.toOperationName())
   }
 
-  @VisibleForTesting
-  fun launchConnectorWithSidecar(
+  @InternalForTesting
+  internal fun launchConnectorWithSidecar(
     kubeInput: ConnectorKubeInput,
     factory: ConnectorPodFactory,
     podLogLabel: String,
   ) {
     var pod =
       factory.create(
-        kubeInput.connectorLabels,
-        kubeInput.nodeSelectors,
-        kubeInput.kubePodInfo,
-        kubeInput.annotations,
-        kubeInput.connectorReqs,
-        kubeInput.initReqs,
-        kubeInput.runtimeEnvVars,
-        kubeInput.workspaceId,
+        allLabels = kubeInput.connectorLabels,
+        nodeSelectors = kubeInput.nodeSelectors,
+        kubePodInfo = kubeInput.kubePodInfo,
+        annotations = kubeInput.annotations,
+        connectorContainerReqs = kubeInput.connectorReqs,
+        initContainerReqs = kubeInput.initReqs,
+        runtimeEnvVars = kubeInput.runtimeEnvVars,
+        workspaceId = kubeInput.workspaceId,
       )
     try {
       pod = kubePodLauncher.create(pod)
     } catch (e: RuntimeException) {
       ApmTraceUtils.addExceptionToTrace(e)
       throw KubeClientException(
-        "Failed to create pod ${kubeInput.kubePodInfo.name}.",
-        e,
-        KubeCommandType.CREATE,
+        message = "Failed to create pod ${kubeInput.kubePodInfo.name}.",
+        cause = e,
+        commandType = KubeCommandType.CREATE,
       )
     }
 
@@ -263,9 +269,9 @@ class KubePodClient(
     } catch (e: RuntimeException) {
       ApmTraceUtils.addExceptionToTrace(e)
       throw KubeClientException(
-        "$podLogLabel pod failed to start within allotted timeout.",
-        e,
-        KubeCommandType.WAIT_MAIN,
+        message = "$podLogLabel pod failed to start within allotted timeout.",
+        cause = e,
+        commandType = KubeCommandType.WAIT_MAIN,
       )
     }
   }

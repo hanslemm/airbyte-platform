@@ -11,9 +11,9 @@ import io.airbyte.api.model.generated.ScopedConfigurationRead
 import io.airbyte.commons.server.errors.BadRequestException
 import io.airbyte.commons.server.handlers.helpers.ScopedConfigurationRelationshipResolver
 import io.airbyte.config.ActorDefinitionVersion
+import io.airbyte.config.ConfigNotFoundType
 import io.airbyte.config.ConfigOriginType
 import io.airbyte.config.ConfigResourceType
-import io.airbyte.config.ConfigSchema
 import io.airbyte.config.ConfigScopeType
 import io.airbyte.config.Organization
 import io.airbyte.config.ScopedConfiguration
@@ -22,7 +22,7 @@ import io.airbyte.config.StandardSourceDefinition
 import io.airbyte.config.StandardWorkspace
 import io.airbyte.config.User
 import io.airbyte.config.persistence.UserPersistence
-import io.airbyte.data.exceptions.ConfigNotFoundException
+import io.airbyte.data.ConfigNotFoundException
 import io.airbyte.data.services.ActorDefinitionService
 import io.airbyte.data.services.DestinationService
 import io.airbyte.data.services.OrganizationService
@@ -125,6 +125,68 @@ internal class ScopedConfigurationHandlerTest {
         .expiresAt(scopedConfiguration.expiresAt?.let { LocalDate.parse(scopedConfiguration.expiresAt) })
 
     assertEquals(expectedRead, scopedConfigurationRead)
+  }
+
+  @Test
+  fun `test listScopedConfigurationsWithOriginType`() {
+    val scopedConfigurations =
+      listOf(
+        ScopedConfiguration()
+          .withId(UUID.randomUUID())
+          .withValue("value1")
+          .withKey("key1")
+          .withDescription("description1")
+          .withReferenceUrl("url1")
+          .withResourceId(UUID.randomUUID())
+          .withResourceType(ConfigResourceType.ACTOR_DEFINITION)
+          .withScopeId(UUID.randomUUID())
+          .withScopeType(ConfigScopeType.ORGANIZATION)
+          .withOrigin(UUID.randomUUID().toString())
+          .withOriginType(ConfigOriginType.USER),
+        ScopedConfiguration()
+          .withId(UUID.randomUUID())
+          .withValue("value2")
+          .withKey("key1")
+          .withDescription("description2")
+          .withReferenceUrl("url2")
+          .withResourceId(UUID.randomUUID())
+          .withResourceType(ConfigResourceType.ACTOR_DEFINITION)
+          .withScopeId(UUID.randomUUID())
+          .withScopeType(ConfigScopeType.ACTOR)
+          .withOrigin(UUID.randomUUID().toString())
+          .withOriginType(ConfigOriginType.USER)
+          .withExpiresAt("2023-01-01"),
+      )
+
+    every { scopedConfigurationService.listScopedConfigurations(ConfigOriginType.USER) } returns scopedConfigurations
+    every { organizationService.getOrganization(scopedConfigurations[0].scopeId) } returns Optional.of(Organization().withName("org name"))
+    every { sourceService.getSourceConnection(scopedConfigurations[1].scopeId) } returns SourceConnection().withName("source actor name")
+    every { sourceService.getStandardSourceDefinition(any()) } returns StandardSourceDefinition().withName("source def name")
+    every { userPersistence.getUser(any()) } returns Optional.of(User().withEmail("me@airbyte.io"))
+
+    val expectedScopedConfigurationReads =
+      scopedConfigurations.map { scopedConfiguration ->
+        ScopedConfigurationRead()
+          .id(scopedConfiguration.id.toString())
+          .value(scopedConfiguration.value)
+          .configKey(scopedConfiguration.key)
+          .description(scopedConfiguration.description)
+          .referenceUrl(scopedConfiguration.referenceUrl)
+          .resourceId(scopedConfiguration.resourceId.toString())
+          .resourceType(scopedConfiguration.resourceType.toString())
+          .resourceName("source def name")
+          .scopeId(scopedConfiguration.scopeId.toString())
+          .scopeType(scopedConfiguration.scopeType.toString())
+          .scopeName(if (scopedConfiguration.scopeType == ConfigScopeType.ORGANIZATION) "org name" else "source actor name")
+          .origin(scopedConfiguration.origin)
+          .originType(scopedConfiguration.originType.toString())
+          .originName("me@airbyte.io")
+          .expiresAt(scopedConfiguration.expiresAt?.let { LocalDate.parse(scopedConfiguration.expiresAt) })
+      }
+
+    val actualScopedConfigurationReads = scopedConfigurationHandler.listScopedConfigurations(ConfigOriginType.USER)
+
+    assertEquals(expectedScopedConfigurationReads, actualScopedConfigurationReads)
   }
 
   @Test
@@ -443,12 +505,12 @@ internal class ScopedConfigurationHandlerTest {
 
     every { sourceService.getStandardSourceDefinition(any()) } throws
       ConfigNotFoundException(
-        ConfigSchema.STANDARD_SOURCE_DEFINITION,
+        ConfigNotFoundType.STANDARD_SOURCE_DEFINITION,
         scopedConfigurationCreate.resourceId,
       )
     every { destinationService.getStandardDestinationDefinition(any()) } throws
       ConfigNotFoundException(
-        ConfigSchema.STANDARD_DESTINATION_DEFINITION,
+        ConfigNotFoundType.STANDARD_DESTINATION_DEFINITION,
         scopedConfigurationCreate.resourceId,
       )
 
@@ -534,7 +596,7 @@ internal class ScopedConfigurationHandlerTest {
     every { userPersistence.getUser(any()) } returns Optional.of(User().withEmail("user@airbyte.io"))
     every { actorDefinitionService.getActorDefinitionVersion(any()) } throws
       ConfigNotFoundException(
-        ConfigSchema.ACTOR_DEFINITION_VERSION,
+        ConfigNotFoundType.ACTOR_DEFINITION_VERSION,
         scopedConfigurationCreate.resourceId,
       )
 

@@ -8,8 +8,6 @@ global:
   # -- Edition; "community" or "enterprise"
   edition: "community"
 
-  airbyteYml: ""
-
   enterprise:
     # -- Secret name where an Airbyte license key is stored
     secretName: "airbyte-config-secrets"
@@ -59,6 +57,8 @@ global:
     #    domain: ""
     #    # -- OIDC application name
     #    appName: ""
+    #    # -- OIDC application display name (sets the name to present to the user on the login form, defaults to appName if not set)  
+    #    displayName: ""
     #    # -- The key within `clientIdSecretName` where the OIDC client id is stored
     #    clientIdSecretKey: "client-id"
     #    # -- The key within `clientSecretSecretName` where the OIDC client secret is stored
@@ -342,11 +342,8 @@ webapp:
     # -- The webapp API url
     url: /api/v1/
 
-  connector-builder-server:
-    url: /connector-builder-api
-
   fullstory:
-    # -- Whether or not to enable fullstory
+    # -- Whether to enable fullstory
     enabled: false
 
   ## Examples (when using `webapp.containerSecurityContext.readOnlyRootFilesystem=true`):
@@ -437,106 +434,6 @@ webapp:
   ##   DATABASE_PORT: 5432
   # -- Supply extra env variables to main container using simplified notation
   env_vars: {}
-
-## @section Pod Sweeper parameters
-
-pod-sweeper:
-  enabled: false
-  image:
-    # -- The image repository to use for the pod sweeper
-    repository: airbyte/pod-sweeper
-
-  # -- Add extra annotations to the podSweeper pod
-  podAnnotations: {}
-
-  # -- Add extra labels to the podSweeper pod
-  podLabels: {}
-
-  # -- Security context for the container
-  podSecurityContext:
-    fsGroup: 1000
-
-  containerSecurityContext:
-    allowPrivilegeEscalation: false 
-    runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    readOnlyRootFilesystem: false
-    capabilities:
-      drop: ["ALL"]
-    seccompProfile:
-      type: RuntimeDefault
-
-  livenessProbe:
-    # -- Enable livenessProbe on the podSweeper
-    enabled: true
-    # -- Initial delay seconds for livenessProbe
-    initialDelaySeconds: 5
-    # -- Period seconds for livenessProbe
-    periodSeconds: 30
-    # -- Timeout seconds for livenessProbe
-    timeoutSeconds: 1
-    # -- Failure threshold for livenessProbe
-    failureThreshold: 3
-    # -- Success threshold for livenessProbe
-    successThreshold: 1
-
-  readinessProbe:
-    # -- Enable readinessProbe on the podSweeper
-    enabled: true
-    # -- Initial delay seconds for readinessProbe
-    initialDelaySeconds: 5
-    # -- Period seconds for readinessProbe
-    periodSeconds: 30
-    # -- Timeout seconds for readinessProbe
-    timeoutSeconds: 1
-    # -- Failure threshold for readinessProbe
-    failureThreshold: 3
-    # -- Success threshold for readinessProbe
-    successThreshold: 1
-
-  ## Pod Sweeper app resource requests and limits
-  ## ref: http://kubernetes.io/docs/user-guide/compute-resources/
-  ## We usually recommend not to specify default resources and to leave this as a conscious
-  ## choice for the user. This also increases chances charts run on environments with little
-  ## resources, such as Minikube. If you do want to specify resources, uncomment the following
-  ## lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  resources:
-    ## Example:
-    ## limits:
-    ##    cpu: 200m
-    ##    memory: 1Gi
-    # -- The resources limits for the podSweeper container
-    limits: {}
-    ## Examples:
-    ## requests:
-    ##    memory: 256Mi
-    ##    cpu: 250m
-    # -- The requested resources for the podSweeper container
-    requests: {}
-
-  # -- Node labels for pod assignment, see https://kubernetes.io/docs/user-guide/node-selection/
-  nodeSelector: {}
-
-  # -- Tolerations for pod assignment, see https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
-  tolerations: []
-
-  # -- Affinity and anti-affinity for pod assignment, see https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity
-  affinity: {}
-
-  ## Examples:
-  ## extraVolumeMounts:
-  ##   - name: tmpdir
-  ##     mountPath: /tmp
-  # -- Additional volumeMounts for podSweeper container(s).
-  extraVolumeMounts: []
-
-  ## Examples:
-  ## extraVolumes:
-  ##   - name: tmpdir
-  ##     emptyDir: {}
-  # -- Additional volumes for podSweeper pod(s).
-  extraVolumes: []
 
 ## @section Server parameters
 
@@ -1413,7 +1310,7 @@ temporal:
     # -- The pull policy for the temporal image
     pullPolicy: IfNotPresent
     # -- The temporal image tag to use
-    tag: "1.26"
+    tag: "1.27.2"
 
   service:
     # -- The Kubernetes Service Type
@@ -1448,7 +1345,7 @@ temporal:
   ## Examples (when using `temporal.containerSecurityContext.readOnlyRootFilesystem=true`):
   ## extraInitContainers:
   ##   - name: config-loader
-  ##     image: temporalio/auto-setup:1.23
+  ##     image: temporalio/auto-setup:1.27.2
   ##     command:
   ##       - /bin/sh
   ##       - -c
@@ -2345,4 +2242,4 @@ featureflag-server:
 testWebapp:
   image:
     repository: airbyte/airbyte-base-java-image
-    tag: 3.3.2
+    tag: 3.3.7

@@ -15,10 +15,11 @@ import io.airbyte.api.model.generated.DestinationDefinitionUpdate
 import io.airbyte.api.model.generated.PrivateDestinationDefinitionRead
 import io.airbyte.api.model.generated.PrivateDestinationDefinitionReadList
 import io.airbyte.api.model.generated.ScopeType
+import io.airbyte.api.model.generated.WorkspaceIdActorDefinitionRequestBody
 import io.airbyte.api.model.generated.WorkspaceIdRequestBody
-import io.airbyte.commons.auth.AuthRoleConstants
 import io.airbyte.commons.auth.generated.Intent
 import io.airbyte.commons.auth.permissions.RequiresIntent
+import io.airbyte.commons.auth.roles.AuthRoleConstants
 import io.airbyte.commons.server.handlers.DestinationDefinitionsHandler
 import io.airbyte.commons.server.scheduling.AirbyteTaskExecutors
 import io.airbyte.commons.server.validation.ActorDefinitionAccessValidator
@@ -68,20 +69,21 @@ open class DestinationDefinitionApiController(
   ) {
     accessValidator.validateWriteAccess(destinationDefinitionIdRequestBody.destinationDefinitionId)
     execute<Any?> {
-      destinationDefinitionsHandler.deleteDestinationDefinition(destinationDefinitionIdRequestBody)
+      destinationDefinitionsHandler.deleteDestinationDefinition(destinationDefinitionIdRequestBody.destinationDefinitionId)
       null
     }
   }
 
   @Post(uri = "/get")
-  @Secured(AuthRoleConstants.AUTHENTICATED_USER)
+  @Secured(AuthRoleConstants.AUTHENTICATED_USER, AuthRoleConstants.DATAPLANE)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun getDestinationDefinition(
     @Body destinationDefinitionIdRequestBody: DestinationDefinitionIdRequestBody,
   ): DestinationDefinitionRead? =
     execute {
       destinationDefinitionsHandler.getDestinationDefinition(
-        destinationDefinitionIdRequestBody,
+        destinationDefinitionIdRequestBody.destinationDefinitionId,
+        true,
       )
     }
 
@@ -135,7 +137,7 @@ open class DestinationDefinitionApiController(
   @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun listDestinationDefinitionsForWorkspace(
-    @Body workspaceIdRequestBody: WorkspaceIdRequestBody,
+    @Body workspaceIdRequestBody: WorkspaceIdActorDefinitionRequestBody,
   ): io.airbyte.api.model.generated.DestinationDefinitionReadList? =
     execute {
       destinationDefinitionsHandler.listDestinationDefinitionsForWorkspace(

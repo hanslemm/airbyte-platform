@@ -8,13 +8,11 @@ import io.airbyte.api.client.model.generated.DeploymentMetadataRead
 import io.airbyte.api.client.model.generated.WorkspaceRead
 import io.airbyte.api.problems.model.generated.ProblemResourceData
 import io.airbyte.api.problems.throwable.generated.ResourceNotFoundProblem
-import io.airbyte.commons.enums.Enums
 import io.airbyte.commons.server.converters.NotificationConverter
 import io.airbyte.commons.server.converters.NotificationSettingsConverter
 import io.airbyte.commons.server.handlers.DeploymentMetadataHandler
-import io.airbyte.config.Geography
 import io.airbyte.config.Organization
-import io.airbyte.data.exceptions.ConfigNotFoundException
+import io.airbyte.data.ConfigNotFoundException
 import io.airbyte.data.services.OrganizationService
 import io.airbyte.data.services.WorkspaceService
 import io.airbyte.validation.json.JsonValidationException
@@ -34,7 +32,7 @@ class AnalyticsTrackingBeanFactory {
   @Replaces(named = "deploymentSupplier")
   fun deploymentSupplier(deploymentMetadataHandler: DeploymentMetadataHandler): Supplier<DeploymentMetadataRead> =
     Supplier {
-      val deploymentMetadataRead = deploymentMetadataHandler.deploymentMetadata
+      val deploymentMetadataRead = deploymentMetadataHandler.getDeploymentMetadata()
       DeploymentMetadataRead(
         deploymentMetadataRead.id,
         deploymentMetadataRead.mode,
@@ -65,10 +63,7 @@ class AnalyticsTrackingBeanFactory {
           NotificationSettingsConverter.toClientApi(workspace.notificationSettings),
           workspace.firstCompletedSync,
           workspace.feedbackDone,
-          Enums.convertTo<Geography, io.airbyte.api.client.model.generated.Geography>(
-            workspace.defaultGeography,
-            io.airbyte.api.client.model.generated.Geography::class.java,
-          ),
+          workspace.dataplaneGroupId,
           null,
           workspace.tombstone,
           null,

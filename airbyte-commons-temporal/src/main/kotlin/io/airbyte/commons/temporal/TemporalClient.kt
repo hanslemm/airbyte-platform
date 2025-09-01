@@ -31,9 +31,9 @@ import io.airbyte.config.WorkloadPriority
 import io.airbyte.config.persistence.StreamRefreshesRepository
 import io.airbyte.config.persistence.StreamResetPersistence
 import io.airbyte.config.persistence.saveStreamsToRefresh
+import io.airbyte.config.secrets.toInlined
 import io.airbyte.data.services.ScopedConfigurationService
 import io.airbyte.data.services.shared.NetworkSecurityTokenKey
-import io.airbyte.featureflag.ANONYMOUS
 import io.airbyte.featureflag.FeatureFlagClient
 import io.airbyte.metrics.MetricAttribute
 import io.airbyte.metrics.MetricClient
@@ -127,7 +127,7 @@ class TemporalClient(
     var workflowExecutionsRequest =
       ListClosedWorkflowExecutionsRequest
         .newBuilder()
-        .setNamespace(workflowClientWrapped.getNamespace())
+        .setNamespace(workflowClientWrapped.namespace)
         .setStatusFilter(StatusFilter.newBuilder().setStatus(executionStatus).build())
         .setTypeFilter(WorkflowTypeFilter.newBuilder().setName(ConnectionManagerWorkflow::class.java.getSimpleName()).build())
         .build()
@@ -219,7 +219,7 @@ class TemporalClient(
    * @param connectionId connection id
    * @return sync result
    */
-  fun startNewManualSync(connectionId: UUID?): ManualOperationResult {
+  fun startNewManualSync(connectionId: UUID): ManualOperationResult {
     logger.info { "Manual sync request" }
 
     if (connectionManagerUtils.isWorkflowStateRunning(connectionId)) {
@@ -263,7 +263,7 @@ class TemporalClient(
    * @param connectionId connection id
    * @return cancellation result
    */
-  fun startNewCancellation(connectionId: UUID?): ManualOperationResult {
+  fun startNewCancellation(connectionId: UUID): ManualOperationResult {
     logger.info { "Manual cancellation request" }
 
     val jobId = connectionManagerUtils.getCurrentJobId(connectionId)
@@ -299,8 +299,8 @@ class TemporalClient(
   }
 
   fun resetConnectionAsync(
-    connectionId: UUID?,
-    streamsToReset: MutableList<StreamDescriptor?>?,
+    connectionId: UUID,
+    streamsToReset: List<StreamDescriptor>,
   ) {
     try {
       streamResetPersistence.createStreamResets(connectionId, streamsToReset)
@@ -385,7 +385,7 @@ class TemporalClient(
   }
 
   private fun getNewJobId(
-    connectionId: UUID?,
+    connectionId: UUID,
     oldJobId: Long,
   ): Long? {
     val currentJobId =
@@ -402,28 +402,22 @@ class TemporalClient(
    *
    * @param jobId job id
    * @param attempt attempt
+   * @param workspaceId workspace id
    * @param config spec config
    * @return spec output
    */
   fun submitGetSpec(
     jobId: UUID,
     attempt: Int,
-    workspaceId: UUID?,
+    workspaceId: UUID,
     config: JobGetSpecConfig,
   ): TemporalResponse<ConnectorJobOutput> {
     val jobRunConfig = TemporalWorkflowUtils.createJobRunConfig(jobId, attempt)
-    // Since SPEC happens before a connector is created, it is expected for a SPEC job to not have a
-    // workspace id unless it is a custom connector.
-    //
-    // This differs from CHECK/DISCOVER/REPLICATION which always have a workspace id thus requiring,
-    // downstream FF checks to null check the workspace before adding the context or failing. Thus, we
-    // default the workspace to simplify this process.
-    val resolvedWorkspaceId = workspaceId ?: ANONYMOUS
     val launcherConfig =
       IntegrationLauncherConfig()
         .withJobId(jobId.toString())
         .withAttemptId(attempt.toLong())
-        .withWorkspaceId(resolvedWorkspaceId)
+        .withWorkspaceId(workspaceId)
         .withDockerImage(config.getDockerImage())
         .withIsCustomConnector(config.getIsCustomConnector())
 
@@ -460,10 +454,10 @@ class TemporalClient(
 
     val input =
       StandardCheckConnectionInput()
-        .withActorType(config.getActorType())
-        .withActorId(config.getActorId())
-        .withConnectionConfiguration(config.getConnectionConfiguration())
-        .withResourceRequirements(config.getResourceRequirements())
+        .withActorType(config.actorType)
+        .withActorId(config.actorId)
+        .withConnectionConfiguration(config.connectionConfiguration.toInlined().value)
+        .withResourceRequirements(config.resourceRequirements)
         .withActorContext(context)
         .withNetworkSecurityTokens(getNetworkSecurityTokens(workspaceId))
 
@@ -504,7 +498,7 @@ class TemporalClient(
         .withPriority(priority)
     val input =
       StandardDiscoverCatalogInput()
-        .withConnectionConfiguration(config.getConnectionConfiguration())
+        .withConnectionConfiguration(config.connectionConfiguration.toInlined().value)
         .withSourceId(config.getSourceId())
         .withConnectorVersion(config.getConnectorVersion())
         .withConfigHash(config.getConfigHash())
@@ -558,7 +552,7 @@ class TemporalClient(
     }
 
   @VisibleForTesting
-  fun <T> execute(
+  fun <T : Any> execute(
     jobRunConfig: JobRunConfig,
     executor: Supplier<T>,
   ): TemporalResponse<T> {
@@ -605,12 +599,12 @@ class TemporalClient(
   private fun <T> getWorkflowStub(
     workflowClass: Class<T>,
     jobType: TemporalJobType,
-    jobId: UUID?,
+    jobId: UUID,
   ): T = workflowClientWrapped.newWorkflowStub<T>(workflowClass, TemporalWorkflowUtils.buildWorkflowOptions(jobType, jobId))
 
   private fun <T> getWorkflowStubWithTaskQueue(
     workflowClass: Class<T>,
-    taskQueue: String?,
+    taskQueue: String,
     jobId: UUID,
   ): T = workflowClientWrapped.newWorkflowStub<T>(workflowClass, TemporalWorkflowUtils.buildWorkflowOptionsWithTaskQueue(taskQueue, jobId))
 
@@ -620,7 +614,7 @@ class TemporalClient(
    *
    * @param connectionId connection id
    */
-  fun submitConnectionUpdaterAsync(connectionId: UUID?): ConnectionManagerWorkflow? {
+  fun submitConnectionUpdaterAsync(connectionId: UUID): ConnectionManagerWorkflow {
     logger.info { "Starting the scheduler temporal wf" }
     val connectionManagerWorkflow = connectionManagerUtils.startConnectionManagerNoSignal(connectionId)
 
@@ -652,7 +646,7 @@ class TemporalClient(
    *
    * @param connectionId - connectionId to cancel
    */
-  fun forceDeleteWorkflow(connectionId: UUID?): Unit = connectionManagerUtils.deleteWorkflowIfItExist(connectionId)
+  fun forceDeleteWorkflow(connectionId: UUID): Unit = connectionManagerUtils.deleteWorkflowIfItExist(connectionId)
 
   /**
    * Signal to the connection manager workflow that there has been a change to the connection's
@@ -694,7 +688,7 @@ class TemporalClient(
    * the query succeeds, and the workflow is not marked as deleted, the workflow is reachable.
    */
   @InternalForTesting
-  internal fun isWorkflowReachable(connectionId: UUID?): Boolean =
+  internal fun isWorkflowReachable(connectionId: UUID): Boolean =
     try {
       connectionManagerUtils.getConnectionManagerWorkflow(connectionId)
       true

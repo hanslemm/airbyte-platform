@@ -33,6 +33,11 @@ airbyte:
       enterprise-source-stubs-url: "http://test-url.com"
   api:
     host: https://api.airbyte.com
+  web-app:
+    url: "http://test-url.com"
+    config: null
+  connector-builder-server-api:
+    token: TEST_TOKEN
 
 datasources:
   config:

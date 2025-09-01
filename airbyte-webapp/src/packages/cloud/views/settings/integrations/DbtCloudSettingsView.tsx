@@ -1,6 +1,6 @@
 import React from "react";
 import { FormattedMessage, useIntl } from "react-intl";
-import * as yup from "yup";
+import { z } from "zod";
 
 import { Form, FormControl } from "components/forms";
 import { FormSubmissionButtons } from "components/forms/FormSubmissionButtons";
@@ -11,33 +11,28 @@ import { ExternalLink } from "components/ui/Link";
 import { Message } from "components/ui/Message";
 import { Text } from "components/ui/Text";
 
-import { useCurrentWorkspace } from "core/api";
 import { useDbtCloudServiceToken } from "core/api/cloud";
 import { useFormatError } from "core/errors";
 import { trackError } from "core/utils/datadog";
 import { links } from "core/utils/links";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 import { useNotificationService } from "hooks/services/Notification";
 
 import { useDbtTokenRemovalModal } from "./useDbtTokenRemovalModal";
 
-const ServiceTokenFormSchema = yup.object().shape({
-  authToken: yup.string().trim().required("form.empty.error"),
-  accessUrl: yup.string().trim().optional(),
+const ServiceTokenFormSchema = z.object({
+  authToken: z.string().trim().nonempty("form.empty.error"),
+  accessUrl: z.string().trim().optional(),
 });
 
-interface DbtConfigurationFormValues {
-  authToken: string;
-  accessUrl?: string;
-}
+type DbtConfigurationFormValues = z.infer<typeof ServiceTokenFormSchema>;
 
 export const DbtCloudSettingsView: React.FC = () => {
   const formatError = useFormatError();
   const { formatMessage } = useIntl();
   const { hasExistingToken, saveToken } = useDbtCloudServiceToken();
   const { registerNotification } = useNotificationService();
-  const { workspaceId, organizationId } = useCurrentWorkspace();
-  const canUpdateWorkspace = useIntent("UpdateWorkspace", { workspaceId, organizationId });
+  const canUpdateWorkspace = useGeneratedIntent(Intent.UpdateWorkspace);
 
   const onDeleteClick = useDbtTokenRemovalModal();
 
@@ -101,7 +96,7 @@ export const DbtCloudSettingsView: React.FC = () => {
               onSubmit={onSubmit}
               onSuccess={onSuccess}
               onError={onError}
-              schema={ServiceTokenFormSchema}
+              zodSchema={ServiceTokenFormSchema}
               disabled={!canUpdateWorkspace}
             >
               <FormControl

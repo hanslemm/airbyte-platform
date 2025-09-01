@@ -77,13 +77,22 @@
   margin-bottom: 0;
 }
 
-.pulsateButton {
+.dynamicStreamButtonContainer {
+  display: flex;
+  flex-direction: row;
+  gap: variables.$spacing-md;
+
+  :last-child {
+    flex-grow: 1;
+  }
+}
+
+.pulsate {
   @include mixins.pulsate(variables.$spacing-lg, variables.$border-radius-sm);
 
   & > * {
     // keep content visible above the pulses
     display: inline-block;
-    position: relative;
     z-index: 1;
   }
 }

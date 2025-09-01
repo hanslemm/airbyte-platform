@@ -46,19 +46,20 @@ $width-login-form: 409px;
 $width-modal-sm: 492px;
 $width-modal-md: 585px;
 $width-modal-lg: 940px;
-$width-modal-xl: 1008px;
+$width-modal-xl: 1080px;
 
 // large total width - sidebar width - main layout padding-left - main layout padding-right
 $min-width-wide-table-container: 1280px - $width-side-menu - $spacing-xl - $spacing-xl;
 $height-empty-sync-catalog: 300px;
 $height-connection-header: 167px;
-$height-long-listbox-options-list: 300px;
+$height-long-listbox-options-list: 310px; // perfect fit for 7 options
 $min-width-listbox-options-list: 250px;
 
 $height-breadcrumb: 45px;
 
 $height-soft-edge: 15px;
 
+$width-sidebar-picker-popover: 240px;
 $button-height-xs: 32px;
 $button-height-sm: 36px;
 $button-height-lg: 44px;
@@ -74,3 +75,5 @@ $font-size-lg: var(--font-size-lg);
 
 // Nothing special, just the default from normalize.css
 $default-line-height: 1.15;
+
+$table-header-height: 40px;

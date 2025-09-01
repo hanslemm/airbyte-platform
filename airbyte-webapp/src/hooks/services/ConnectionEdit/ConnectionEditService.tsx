@@ -4,7 +4,6 @@ import { useIntl } from "react-intl";
 import { useAsyncFn } from "react-use";
 
 import {
-  useCurrentWorkspace,
   useDestinationDefinitionVersion,
   useGetConnection,
   useGetConnectionQuery,
@@ -20,7 +19,8 @@ import {
   WebBackendConnectionRead,
   WebBackendConnectionUpdate,
 } from "core/api/types/AirbyteClient";
-import { useIntent } from "core/utils/rbac";
+import { FormMode, FormModeProvider } from "core/services/ui/FormModeContext";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 
 import { useAnalyticsTrackFunctions } from "./useAnalyticsTrackFunctions";
 import { ConnectionFormServiceProvider } from "../ConnectionForm/ConnectionFormService";
@@ -83,6 +83,7 @@ const useConnectionEdit = ({ connectionId }: ConnectionEditProps): ConnectionEdi
       const updatedConnection = await updateConnectionAction({
         connectionId,
         status,
+        skipReset: true,
       });
       setConnection(updatedConnection);
       trackConnectionStatusUpdate(updatedConnection);
@@ -249,26 +250,30 @@ export const ConnectionEditServiceProvider: React.FC<React.PropsWithChildren<Con
   ...props
 }) => {
   const { refreshSchema, schemaError, ...data } = useConnectionEdit(props);
-  const { workspaceId } = useCurrentWorkspace();
-  const canEditConnection = useIntent("EditConnection", { workspaceId });
+  const canEditConnection = useGeneratedIntent(Intent.CreateOrEditConnection);
+
+  const formMode = useMemo<FormMode>(
+    () =>
+      data.connection.status === ConnectionStatus.deprecated ||
+      !canEditConnection ||
+      data.connection.source.isEntitled === false ||
+      data.connection.destination.isEntitled === false
+        ? "readonly"
+        : "edit",
+    [data.connection, canEditConnection]
+  );
 
   return (
     <ConnectionEditContext.Provider value={data}>
-      <ConnectionFormServiceProvider
-        mode={
-          data.connection.status === ConnectionStatus.deprecated ||
-          !canEditConnection ||
-          data.connection.source.isEntitled === false ||
-          data.connection.destination.isEntitled === false
-            ? "readonly"
-            : "edit"
-        }
-        connection={data.connection}
-        schemaError={schemaError}
-        refreshSchema={refreshSchema}
-      >
-        {children}
-      </ConnectionFormServiceProvider>
+      <FormModeProvider mode={formMode}>
+        <ConnectionFormServiceProvider
+          connection={data.connection}
+          schemaError={schemaError}
+          refreshSchema={refreshSchema}
+        >
+          {children}
+        </ConnectionFormServiceProvider>
+      </FormModeProvider>
     </ConnectionEditContext.Provider>
   );
 };

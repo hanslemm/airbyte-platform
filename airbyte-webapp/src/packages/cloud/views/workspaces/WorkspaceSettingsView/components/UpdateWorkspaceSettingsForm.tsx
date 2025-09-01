@@ -1,43 +1,38 @@
 import React from "react";
 import { useIntl } from "react-intl";
-import * as yup from "yup";
-import { SchemaOf } from "yup";
+import { z } from "zod";
 
 import { Form, FormControl } from "components/forms";
 import { DataResidencyDropdown } from "components/forms/DataResidencyDropdown";
 import { FormSubmissionButtons } from "components/forms/FormSubmissionButtons";
 
 import { useCurrentWorkspace, useInvalidateWorkspace, useUpdateWorkspace } from "core/api";
-import { Geography } from "core/api/types/AirbyteClient";
 import { FeatureItem, useFeature } from "core/services/features";
 import { trackError } from "core/utils/datadog";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 import { useNotificationService } from "hooks/services/Notification";
 
-interface WorkspaceFormValues {
-  name: string;
-  defaultGeography?: Geography;
-}
-
-const ValidationSchema: SchemaOf<WorkspaceFormValues> = yup.object().shape({
-  name: yup.string().required("form.empty.error"),
-  defaultGeography: yup.mixed<Geography>().optional(),
+const ValidationSchema = z.object({
+  name: z.string().trim().nonempty("form.empty.error"),
+  dataplaneGroupId: z.string().optional(),
 });
+
+type WorkspaceFormValues = z.infer<typeof ValidationSchema>;
 
 export const UpdateWorkspaceSettingsForm: React.FC = () => {
   const { formatMessage } = useIntl();
   const { mutateAsync: updateWorkspace } = useUpdateWorkspace();
   const { registerNotification } = useNotificationService();
-  const { workspaceId, organizationId, name, email, defaultGeography } = useCurrentWorkspace();
+  const { workspaceId, name, email, dataplaneGroupId } = useCurrentWorkspace();
   const invalidateWorkspace = useInvalidateWorkspace(workspaceId);
-  const canUpdateWorkspace = useIntent("UpdateWorkspace", { workspaceId, organizationId });
-  const supportsDataResidency = useFeature(FeatureItem.AllowChangeDataGeographies);
+  const canUpdateWorkspace = useGeneratedIntent(Intent.UpdateWorkspace);
+  const supportsDataResidency = useFeature(FeatureItem.AllowChangeDataplanes);
 
-  const onSubmit = async ({ name, defaultGeography }: WorkspaceFormValues) => {
+  const onSubmit = async ({ name, dataplaneGroupId }: WorkspaceFormValues) => {
     await updateWorkspace({
       workspaceId,
       name,
-      defaultGeography,
+      dataplaneGroupId,
     });
 
     await invalidateWorkspace();
@@ -65,9 +60,9 @@ export const UpdateWorkspaceSettingsForm: React.FC = () => {
     <Form<WorkspaceFormValues>
       defaultValues={{
         name,
-        defaultGeography,
+        dataplaneGroupId,
       }}
-      schema={ValidationSchema}
+      zodSchema={ValidationSchema}
       onSubmit={onSubmit}
       onSuccess={onSuccess}
       onError={onError}
@@ -81,7 +76,9 @@ export const UpdateWorkspaceSettingsForm: React.FC = () => {
           id: "settings.workspaceSettings.updateWorkspaceNameForm.name.placeholder",
         })}
       />
-      {supportsDataResidency && <DataResidencyDropdown labelId="settings.defaultGeography" name="defaultGeography" />}
+      {supportsDataResidency && dataplaneGroupId && (
+        <DataResidencyDropdown labelId="settings.region" name="dataplaneGroupId" />
+      )}
       {canUpdateWorkspace && <FormSubmissionButtons noCancel justify="flex-start" submitKey="form.saveChanges" />}
     </Form>
   );

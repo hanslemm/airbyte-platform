@@ -8,7 +8,6 @@ import io.airbyte.api.model.generated.NotificationItem
 import io.airbyte.api.model.generated.NotificationType
 import io.airbyte.api.model.generated.WorkspaceRead
 import io.airbyte.publicApi.server.generated.models.EmailNotificationConfig
-import io.airbyte.publicApi.server.generated.models.GeographyEnum
 import io.airbyte.publicApi.server.generated.models.NotificationConfig
 import io.airbyte.publicApi.server.generated.models.NotificationsConfig
 import io.airbyte.publicApi.server.generated.models.WebhookNotificationConfig
@@ -24,14 +23,14 @@ object WorkspaceResponseMapper {
    * @param workspaceRead Output of a workspace create/get from config api
    * @return WorkspaceResponse Response object which contains the workspace id
    */
-  fun from(workspaceRead: WorkspaceRead): WorkspaceResponse =
+  fun from(
+    workspaceRead: WorkspaceRead,
+    dataplaneGroupName: String,
+  ): WorkspaceResponse =
     WorkspaceResponse(
       workspaceId = workspaceRead.workspaceId.toString(),
       name = workspaceRead.name,
-      dataResidency =
-        workspaceRead.defaultGeography?.let { defaultGeography ->
-          GeographyEnum.valueOf(defaultGeography.toString().uppercase())
-        } ?: GeographyEnum.AUTO,
+      dataResidency = dataplaneGroupName.lowercase(),
       notifications =
         NotificationsConfig(
           failure = workspaceRead.notificationSettings?.sendOnFailure?.toNotificationConfig(),

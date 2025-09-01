@@ -24,10 +24,10 @@ import io.airbyte.server.apis.publicapi.mappers.ConnectionCreateMapper
 import io.airbyte.server.apis.publicapi.mappers.ConnectionReadMapper
 import io.airbyte.server.apis.publicapi.mappers.ConnectionUpdateMapper
 import io.airbyte.server.apis.publicapi.mappers.ConnectionsResponseMapper
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micronaut.context.annotation.Secondary
 import io.micronaut.context.annotation.Value
 import jakarta.inject.Singleton
-import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.UUID
 
@@ -46,7 +46,7 @@ interface ConnectionService {
   fun updateConnection(
     connectionId: UUID,
     connectionPatchRequest: ConnectionPatchRequest,
-    catalogId: UUID,
+    catalogId: UUID?,
     configuredCatalog: AirbyteCatalog?,
     workspaceId: UUID,
   ): ConnectionResponse
@@ -60,6 +60,8 @@ interface ConnectionService {
   ): ConnectionsResponse
 }
 
+private val log = KotlinLogging.logger {}
+
 @Singleton
 @Secondary
 class ConnectionServiceImpl(
@@ -68,10 +70,6 @@ class ConnectionServiceImpl(
   private val connectionHandler: ConnectionsHandler,
   private val currentUserService: CurrentUserService,
 ) : ConnectionService {
-  companion object {
-    private val log = LoggerFactory.getLogger(ConnectionServiceImpl::class.java)
-  }
-
   @Value("\${airbyte.api.host}")
   var publicApiHost: String? = null
 
@@ -85,15 +83,19 @@ class ConnectionServiceImpl(
     workspaceId: UUID,
   ): ConnectionResponse {
     val connectionCreateOss: ConnectionCreate =
-      ConnectionCreateMapper.from(connectionCreateRequest, catalogId, configuredCatalog)
+      ConnectionCreateMapper.from(
+        connectionCreateRequest,
+        catalogId,
+        configuredCatalog,
+      )
 
     val result: Result<ConnectionRead> =
       kotlin
         .runCatching { connectionHandler.createConnection(connectionCreateOss) }
         .onFailure {
-          log.error("Error while creating connection: ", it)
+          log.error(it) { "Error while creating connection" }
           throw ConfigClientErrorHandler.handleCreateConnectionError(it, connectionCreateRequest)
-        }.onSuccess { log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + it) }
+        }.onSuccess { log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + it } }
 
     return try {
       ConnectionReadMapper.from(
@@ -101,7 +103,7 @@ class ConnectionServiceImpl(
         workspaceId,
       )
     } catch (e: Exception) {
-      log.error("Error while reading response and converting to Connection read: ", e)
+      log.error(e) { "Error while reading response and converting to Connection read" }
       throw UnexpectedProblem()
     }
   }
@@ -115,10 +117,10 @@ class ConnectionServiceImpl(
         .runCatching {
           connectionHandler.deleteConnection(connectionId)
         }.onFailure {
-          log.error("Error while deleting connection: ", it)
+          log.error(it) { "Error while deleting connection" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result.getOrNull())
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result.getOrNull() }
   }
 
   /**
@@ -126,19 +128,18 @@ class ConnectionServiceImpl(
    */
   override fun getConnection(connectionId: UUID): ConnectionResponse {
     val result =
-      kotlin
-        .runCatching {
-          connectionHandler.getConnection(connectionId)
-        }.onFailure {
-          log.error("Error while getting connection: ", it)
-          ConfigClientErrorHandler.handleError(it)
-        }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+      runCatching {
+        connectionHandler.getConnection(connectionId)
+      }.onFailure {
+        log.error(it) { "Error while getting connection" }
+        ConfigClientErrorHandler.handleError(it)
+      }
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
 
     val connectionRead = result.getOrNull()!!
 
     // get workspace id from source id
-    val sourceResponse: SourceResponse = sourceService.getSource(connectionRead.sourceId)
+    val sourceResponse: SourceResponse = sourceService.getSource(connectionRead.sourceId, false)
 
     return ConnectionReadMapper.from(
       connectionRead,
@@ -152,7 +153,7 @@ class ConnectionServiceImpl(
   override fun updateConnection(
     connectionId: UUID,
     connectionPatchRequest: ConnectionPatchRequest,
-    catalogId: UUID,
+    catalogId: UUID?,
     configuredCatalog: AirbyteCatalog?,
     workspaceId: UUID,
   ): ConnectionResponse {
@@ -170,10 +171,10 @@ class ConnectionServiceImpl(
       kotlin
         .runCatching { connectionHandler.updateConnection(connectionUpdate, null, false) }
         .onFailure {
-          log.error("Error while updating connection: ", it)
+          log.error(it) { "Error while updating connection" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
 
     val connectionRead = result.getOrNull()!!
 
@@ -183,7 +184,7 @@ class ConnectionServiceImpl(
         workspaceId,
       )
     } catch (e: java.lang.Exception) {
-      log.error("Error while reading and converting to Connection Response: ", e)
+      log.error(e) { "Error while reading and converting to Connection Response" }
       throw UnexpectedProblem()
     }
   }
@@ -199,7 +200,7 @@ class ConnectionServiceImpl(
     includeDeleted: Boolean,
   ): ConnectionsResponse {
     val pagination: Pagination = Pagination().pageSize(limit).rowOffset(offset)
-    val workspaceIdsToQuery = workspaceIds.ifEmpty { userService.getAllWorkspaceIdsForUser(currentUserService.currentUser.userId) }
+    val workspaceIdsToQuery = workspaceIds.ifEmpty { userService.getAllWorkspaceIdsForUser(currentUserService.getCurrentUser().userId) }
 
     val listConnectionsForWorkspacesRequestBody =
       ListConnectionsForWorkspacesRequestBody()
@@ -213,10 +214,10 @@ class ConnectionServiceImpl(
         .runCatching {
           connectionHandler.listConnectionsForWorkspaces(listConnectionsForWorkspacesRequestBody)
         }.onFailure {
-          log.error("Error while listing connections for workspaces: ", it)
+          log.error(it) { "Error while listing connections for workspaces" }
           ConfigClientErrorHandler.handleError(it)
         }
-    log.debug(HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result)
+    log.debug { HTTP_RESPONSE_BODY_DEBUG_MESSAGE + result }
     val connectionReadList = result.getOrNull()!!
 
     return ConnectionsResponseMapper.from(

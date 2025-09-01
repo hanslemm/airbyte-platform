@@ -45,6 +45,15 @@ intents:
     roles:
       - ORGANIZATION_ADMIN
       - ADMIN
+  ViewOrganizationSettings:
+    name: View organization settings
+    description: Ability to see the settings of an organization
+    roles:
+      - ORGANIZATION_READER
+      - ORGANIZATION_RUNNER
+      - ORGANIZATION_EDITOR
+      - ORGANIZATION_ADMIN
+      - ADMIN
   ViewOrganizationTrialStatus:
     name: View organization trial status
     description: Ability to see the trial status of an organization
@@ -66,6 +75,16 @@ intents:
     roles:
       - ORGANIZATION_ADMIN
       - ADMIN
+  ViewOrganizationDetails:
+    name: View organization details
+    description: View detailed information about the organization
+    roles:
+      - ORGANIZATION_MEMBER
+      - ORGANIZATION_READER
+      - ORGANIZATION_RUNNER
+      - ORGANIZATION_EDITOR
+      - ORGANIZATION_ADMIN
+      - ADMIN
   ManageOrganizationPaymentConfigs:
     name: Manage organization payment configs
     description: Ability to directly interact with organization payment configs
@@ -82,6 +101,96 @@ intents:
       - ORGANIZATION_EDITOR
       - ORGANIZATION_ADMIN
       - WORKSPACE_RUNNER
+      - WORKSPACE_EDITOR
+      - WORKSPACE_ADMIN
+      - ADMIN
+
+  ManageSecretStorages:
+    name: Manage secret storages
+    description: Ability to manage secret storages
+    roles:
+      - ADMIN
+
+  ViewConfigTemplates:
+    name: View config templates
+    description: Allow user to get and list config templates
+    roles:
+      - EMBEDDED_END_USER
+      - WORKSPACE_READER
+      - WORKSPACE_RUNNER
+      - WORKSPACE_EDITOR
+      - WORKSPACE_ADMIN
+      - ORGANIZATION_READER
+      - ORGANIZATION_RUNNER
+      - ORGANIZATION_EDITOR
+      - ORGANIZATION_ADMIN
+      - ADMIN
+
+  ViewAndEditPartialConfigs:
+    name: View and edit partial configs
+    description: Allow user to view and edit partial configs
+    roles:
+      - EMBEDDED_END_USER
+      - ORGANIZATION_EDITOR
+      - ORGANIZATION_ADMIN
+      - ADMIN
+
+  RunOAuthFlow:
+    name: Run the OAuth flow
+    description: Allow user to run OAuth flow
+    roles:
+      - EMBEDDED_END_USER
+      - WORKSPACE_EDITOR
+      - WORKSPACE_ADMIN
+      - ORGANIZATION_EDITOR
+      - ORGANIZATION_ADMIN
+      - ADMIN
+  UpdateWorkspace:
+    name: Update workspace
+    description: Update a workspace's settings
+    roles:
+      - ORGANIZATION_ADMIN
+      - ORGANIZATION_EDITOR
+      - WORKSPACE_ADMIN
+      - ADMIN
+  DeleteWorkspace:
+    name: Delete workspace
+    description: Delete a workspace
+    roles:
+      - ORGANIZATION_ADMIN
+      - WORKSPACE_ADMIN
+      - ADMIN
+  UpdateWorkspacePermissions:
+    name: Update workspace-level permissions
+    description: Update a user's workspace-level permissions
+    roles:
+      - ORGANIZATION_ADMIN
+      - WORKSPACE_ADMIN
+      - ADMIN
+  UpdateOrganizationPermissions:
+    name: Update organization-level permissions
+    description: Update a user's organization-level permissions
+    roles:
+      - ORGANIZATION_ADMIN
+      - ADMIN
+  ViewWorkspaceSettings:
+    name: View workspace settings
+    description: View settings for a workspace
+    roles:
+      - ORGANIZATION_ADMIN
+      - ORGANIZATION_EDITOR
+      - ORGANIZATION_RUNNER
+      - ORGANIZATION_READER
+      - WORKSPACE_ADMIN
+      - WORKSPACE_EDITOR
+      - WORKSPACE_RUNNER
+      - WORKSPACE_READER
+  CreateOrEditConnectorBuilder:
+    name: Create or edit connector builder connectors
+    description: Create a connector builder connector or change the settings of an existing connector builder connector
+    roles:
+      - ORGANIZATION_EDITOR
+      - ORGANIZATION_ADMIN
       - WORKSPACE_EDITOR
       - WORKSPACE_ADMIN
       - ADMIN

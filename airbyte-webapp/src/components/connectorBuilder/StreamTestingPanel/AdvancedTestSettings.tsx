@@ -1,9 +1,11 @@
-import { useFormContext } from "react-hook-form";
+import { get, useFormContext, useFormState, useWatch } from "react-hook-form";
 import { FormattedMessage, useIntl } from "react-intl";
-import * as yup from "yup";
+import { z } from "zod";
 
 import { Form, FormControl } from "components/forms";
+import { FormControlErrorMessage, FormControlFooter, FormLabel } from "components/forms/FormControl";
 import { Button } from "components/ui/Button";
+import { CodeEditor } from "components/ui/CodeEditor";
 import { FlexContainer, FlexItem } from "components/ui/Flex";
 import { Modal, ModalBody, ModalFooter } from "components/ui/Modal";
 import { Tooltip } from "components/ui/Tooltip";
@@ -11,31 +13,45 @@ import { Tooltip } from "components/ui/Tooltip";
 import { TestReadContext, useConnectorBuilderTestRead } from "services/connectorBuilder/ConnectorBuilderStateService";
 
 import styles from "./AdvancedTestSettings.module.scss";
-import { BuilderField } from "../Builder/BuilderField";
-import { jsonString } from "../useBuilderValidationSchema";
 
 const MAX_RECORD_LIMIT = 5000;
 const MAX_PAGE_LIMIT = 20;
 const MAX_SLICE_LIMIT = 20;
-
-const numericCountField = yup
-  .number()
-  .positive()
-  .required()
-  .transform((value) => (isNaN(value) ? 0 : value));
-const testReadLimitsValidation = yup.object({
-  recordLimit: numericCountField.label("Record limit").max(MAX_RECORD_LIMIT).min(1),
-  pageLimit: numericCountField.label("Page limit").max(MAX_PAGE_LIMIT).min(1),
-  sliceLimit: numericCountField.label("Partition limit").max(MAX_SLICE_LIMIT).min(1),
-  testState: jsonString,
-});
+const MAX_STREAM_LIMIT = 100;
 
 interface AdvancedTestSettingsFormValues {
   recordLimit: number;
   pageLimit: number;
   sliceLimit: number;
+  streamLimit: number;
   testState?: string;
 }
+
+const testLimitsValidation = z.object({
+  recordLimit: z.coerce.number().min(1).max(MAX_RECORD_LIMIT),
+  pageLimit: z.coerce.number().min(1).max(MAX_PAGE_LIMIT),
+  sliceLimit: z.coerce.number().min(1).max(MAX_SLICE_LIMIT),
+  streamLimit: z.coerce.number().min(1).max(MAX_STREAM_LIMIT),
+  testState: z
+    .string()
+    .refine(
+      (val) => {
+        if (!val) {
+          return true;
+        }
+        try {
+          JSON.parse(val);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      {
+        message: "connectorBuilder.invalidJSON",
+      }
+    )
+    .optional(),
+});
 
 interface AdvancedTestSettingsProps {
   className?: string;
@@ -50,6 +66,7 @@ export const AdvancedTestSettings: React.FC<AdvancedTestSettingsProps> = ({ clas
     testState,
     setTestState,
     streamRead: { isFetching },
+    generatedStreamsLimits: { streamLimit, setStreamLimit, defaultGeneratedLimits },
   } = useConnectorBuilderTestRead();
 
   return (
@@ -78,17 +95,19 @@ export const AdvancedTestSettings: React.FC<AdvancedTestSettingsProps> = ({ clas
           title={formatMessage({ id: "connectorBuilder.testReadSettings.modalTitle" })}
         >
           <Form<AdvancedTestSettingsFormValues>
-            schema={testReadLimitsValidation}
+            zodSchema={testLimitsValidation}
             defaultValues={{
               recordLimit,
               pageLimit,
               sliceLimit,
+              streamLimit,
               testState,
             }}
             onSubmit={async (data: AdvancedTestSettingsFormValues) => {
               setRecordLimit(data.recordLimit);
               setSliceLimit(data.sliceLimit);
               setPageLimit(data.pageLimit);
+              setStreamLimit(data.streamLimit);
               setTestState(data.testState ?? "");
               setIsOpen(false);
             }}
@@ -101,6 +120,9 @@ export const AdvancedTestSettings: React.FC<AdvancedTestSettingsProps> = ({ clas
               setPageLimit={setPageLimit}
               sliceLimit={sliceLimit}
               setSliceLimit={setSliceLimit}
+              defaultGeneratedLimits={defaultGeneratedLimits}
+              streamLimit={streamLimit}
+              setStreamLimit={setStreamLimit}
               testState={testState}
               setTestState={setTestState}
               setIsOpen={setIsOpen}
@@ -115,6 +137,7 @@ export const AdvancedTestSettings: React.FC<AdvancedTestSettingsProps> = ({ clas
 const AdvancedTestSettingsForm: React.FC<
   Pick<AdvancedTestSettingsProps, "setIsOpen"> &
     TestReadContext["testReadLimits"] &
+    TestReadContext["generatedStreamsLimits"] &
     Pick<TestReadContext, "testState" | "setTestState">
 > = ({
   defaultLimits,
@@ -124,6 +147,9 @@ const AdvancedTestSettingsForm: React.FC<
   setPageLimit,
   sliceLimit,
   setSliceLimit,
+  defaultGeneratedLimits,
+  streamLimit,
+  setStreamLimit,
   testState,
   setTestState,
   setIsOpen,
@@ -161,11 +187,15 @@ const AdvancedTestSettingsForm: React.FC<
           max={MAX_SLICE_LIMIT}
           label={formatMessage({ id: "connectorBuilder.testReadSettings.sliceLimit" })}
         />
-        <BuilderField
-          type="jsoneditor"
-          path="testState"
-          label={formatMessage({ id: "connectorBuilder.testReadSettings.testState" })}
+        <FormControl<AdvancedTestSettingsFormValues>
+          fieldType="input"
+          type="number"
+          name="streamLimit"
+          min={1}
+          max={MAX_STREAM_LIMIT}
+          label={formatMessage({ id: "connectorBuilder.generateStreamsSettings.streamLimit" })}
         />
+        <TestStateEditor name="testState" />
       </ModalBody>
       <ModalFooter>
         <FlexContainer className={styles.footer}>
@@ -177,8 +207,10 @@ const AdvancedTestSettingsForm: React.FC<
                 setRecordLimit(defaultLimits.recordLimit);
                 setSliceLimit(defaultLimits.sliceLimit);
                 setPageLimit(defaultLimits.pageLimit);
+                setStreamLimit(defaultGeneratedLimits.streamLimit);
                 setTestState("");
                 reset({ ...defaultLimits });
+                reset({ ...defaultGeneratedLimits });
               }}
             >
               <FormattedMessage id="form.reset" />
@@ -188,7 +220,7 @@ const AdvancedTestSettingsForm: React.FC<
             type="button"
             variant="secondary"
             onClick={() => {
-              reset({ recordLimit, pageLimit, sliceLimit, testState });
+              reset({ recordLimit, pageLimit, sliceLimit, streamLimit, testState });
               setIsOpen(false);
             }}
           >
@@ -200,5 +232,33 @@ const AdvancedTestSettingsForm: React.FC<
         </FlexContainer>
       </ModalFooter>
     </>
+  );
+};
+
+const TestStateEditor: React.FC<{ name: string }> = ({ name }) => {
+  const { formatMessage } = useIntl();
+  const value = useWatch({ name });
+  const { setValue } = useFormContext();
+  const { errors } = useFormState({ name });
+  const error = !!get(errors, name);
+
+  return (
+    <FlexContainer direction="column" className={styles.testStateEditor}>
+      <FormLabel htmlFor={name} label={formatMessage({ id: "connectorBuilder.testReadSettings.testState" })} />
+      <div className={styles.stateEditorContainer}>
+        <CodeEditor
+          value={value}
+          language="json"
+          onChange={(val: string | undefined) => {
+            setValue(name, val, { shouldValidate: true, shouldTouch: true, shouldDirty: true });
+          }}
+        />
+      </div>
+      {error && (
+        <FormControlFooter>
+          <FormControlErrorMessage name={name} />
+        </FormControlFooter>
+      )}
+    </FlexContainer>
   );
 };

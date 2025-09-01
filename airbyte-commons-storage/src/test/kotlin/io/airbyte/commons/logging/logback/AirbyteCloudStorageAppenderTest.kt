@@ -12,14 +12,16 @@ import ch.qos.logback.core.status.ErrorStatus
 import ch.qos.logback.core.status.Status
 import ch.qos.logback.core.status.StatusManager
 import io.airbyte.commons.envvar.EnvVar
-import io.airbyte.commons.resources.MoreResources
+import io.airbyte.commons.resources.Resources
 import io.airbyte.commons.storage.AzureStorageClient
 import io.airbyte.commons.storage.DocumentType
 import io.airbyte.commons.storage.GcsStorageClient
 import io.airbyte.commons.storage.LocalStorageClient
 import io.airbyte.commons.storage.MinioStorageClient
 import io.airbyte.commons.storage.S3StorageClient
+import io.airbyte.commons.storage.STRUCTURED_LOG_FILE_EXTENSION
 import io.airbyte.commons.storage.StorageClient
+import io.airbyte.commons.storage.createFileId
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -73,7 +75,7 @@ private class AirbyteCloudStorageAppenderTest {
   @Test
   fun testBuildGcsStorageClient() {
     val bucket = "test-bucket"
-    val applicationCredentials = MoreResources.readResourceAsFile("sample_gcs_credentials.json")
+    val applicationCredentials = Resources.readResourceAsFile("sample_gcs_credentials.json")
     val credentials = applicationCredentials.path
     val storageType = "gcs"
     val storageConfig =

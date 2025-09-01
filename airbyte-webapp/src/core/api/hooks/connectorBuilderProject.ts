@@ -1,48 +1,72 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import isArray from "lodash/isArray";
+import { useCallback } from "react";
+
+import { DEFAULT_JSON_MANIFEST_VALUES_WITH_STREAM } from "components/connectorBuilder/constants";
 
 import { useCurrentWorkspaceId } from "area/workspace/utils";
-import { sourceDefinitionKeys } from "core/api";
+import { HttpError, sourceDefinitionKeys } from "core/api";
+import { useFormatError } from "core/errors";
+import { Action, Namespace, useAnalyticsService } from "core/services/analytics";
+import { useExperiment } from "hooks/services/Experiment";
+import { useNotificationService } from "hooks/services/Notification";
 
-import { useBuilderResolveManifestQuery } from "./connectorBuilderApi";
 import {
+  checkContribution,
   createConnectorBuilderProject,
   createDeclarativeSourceDefinitionManifest,
   deleteConnectorBuilderProject,
+  fullResolveManifestBuilderProject,
+  generateContribution,
+  getConnectorBuilderCapabilities,
   getConnectorBuilderProject,
+  getConnectorBuilderProjectIdForDefinitionId,
+  getDeclarativeManifestBaseImage,
   listConnectorBuilderProjects,
   listDeclarativeManifests,
   publishConnectorBuilderProject,
   readConnectorBuilderProjectStream,
+  resolveManifestBuilderProject,
   updateConnectorBuilderProject,
   updateConnectorBuilderProjectTestingValues,
   updateDeclarativeManifestVersion,
-  getDeclarativeManifestBaseImage,
   createForkedConnectorBuilderProject,
-  getConnectorBuilderProjectIdForDefinitionId,
 } from "../generated/AirbyteClient";
 import { SCOPE_WORKSPACE } from "../scopes";
 import {
+  BaseActorDefinitionVersionInfo,
+  BuilderProjectForDefinitionResponse,
+  CheckContributionRead,
+  CheckContributionRequestBody,
+  ConnectorBuilderProjectDetailsRead,
+  ConnectorBuilderProjectFullResolveRequestBody,
   ConnectorBuilderProjectIdWithWorkspaceId,
-  DeclarativeManifestVersionRead,
   ConnectorBuilderProjectRead,
-  SourceDefinitionIdBody,
-  ConnectorBuilderProjectStreamReadRequestBody,
   ConnectorBuilderProjectStreamRead,
-  ConnectorBuilderProjectTestingValuesUpdate,
-  ConnectorBuilderProjectTestingValues,
+  DeclarativeManifest,
+  ConnectorBuilderProjectStreamReadRequestBody,
   ConnectorBuilderProjectStreamReadSlicesItem,
   ConnectorBuilderProjectStreamReadSlicesItemPagesItem,
   ConnectorBuilderProjectStreamReadSlicesItemStateItem,
-  DeclarativeManifestRequestBody,
-  DeclarativeManifestBaseImageRead,
-  BaseActorDefinitionVersionInfo,
+  ConnectorBuilderProjectTestingValues,
+  ConnectorBuilderProjectTestingValuesUpdate,
   ContributionInfo,
-  ConnectorBuilderProjectDetailsRead,
+  DeclarativeManifestBaseImageRead,
+  DeclarativeManifestRequestBody,
+  DeclarativeManifestVersionRead,
+  GenerateContributionRequestBody,
   SourceDefinitionId,
-  BuilderProjectForDefinitionResponse,
+  SourceDefinitionIdBody,
+  KnownExceptionInfo,
+  ConnectorBuilderCapabilities,
 } from "../types/AirbyteClient";
-import { DeclarativeComponentSchema, DeclarativeStream, NoPaginationType } from "../types/ConnectorManifest";
+import {
+  ConditionalStreamsType,
+  DeclarativeComponentSchema,
+  DeclarativeComponentSchemaStreamsItem,
+  NoPaginationType,
+  StateDelegatingStreamType,
+} from "../types/ConnectorManifest";
 import { useRequestOptions } from "../useRequestOptions";
 import { useSuspenseQuery } from "../useSuspenseQuery";
 
@@ -58,6 +82,11 @@ const connectorBuilderProjectsKeys = {
   getBaseImage: (version: string) => [...connectorBuilderProjectsKeys.all, "getBaseImage", version] as const,
   getProjectForDefinition: (sourceDefinitionId: string | undefined) =>
     [...connectorBuilderProjectsKeys.all, "getProjectByDefinition", sourceDefinitionId] as const,
+  resolveSuspense: (manifest?: DeclarativeManifest) =>
+    [...connectorBuilderProjectsKeys.all, "resolveSuspense", { manifest }] as const,
+  fullResolve: (projectId?: string) => ["builder_project_full_resolve", projectId] as const,
+  checkContribution: (imageName?: string) =>
+    [...connectorBuilderProjectsKeys.all, "checkContribution", { imageName }] as const,
 };
 
 export interface BuilderProject {
@@ -242,7 +271,7 @@ export const useBuilderProject = (builderProjectId: string) => {
 
 export const useResolvedBuilderProjectVersion = (projectId: string, version?: number) => {
   const requestOptions = useRequestOptions();
-  const resolveManifestQuery = useBuilderResolveManifestQuery();
+  const resolveManifestQuery = useBuilderProjectResolveManifestQuery();
   const workspaceId = useCurrentWorkspaceId();
 
   return useQuery(
@@ -489,7 +518,7 @@ export const useChangeBuilderProjectVersion = () => {
 
 export const useBuilderProjectReadStream = (
   params: ConnectorBuilderProjectStreamReadRequestBody,
-  testStream: DeclarativeStream | undefined,
+  testStream: DeclarativeComponentSchemaStreamsItem | undefined,
   onSuccess: (data: StreamReadTransformedSlices) => void
 ) => {
   const requestOptions = useRequestOptions();
@@ -501,6 +530,7 @@ export const useBuilderProjectReadStream = (
         // this shouldn't happen, because read stream can only be triggered when a stream is selected
         throw new Error("No test stream provided - this state should not be reached!");
       }
+
       const streamRead = await readConnectorBuilderProjectStream(params, requestOptions);
       return transformSlices(streamRead, testStream);
     },
@@ -510,6 +540,80 @@ export const useBuilderProjectReadStream = (
       onSuccess,
     }
   );
+};
+
+export const useBuilderProjectResolveManifestQuery = () => {
+  const requestOptions = useRequestOptions();
+  const workspaceId = useCurrentWorkspaceId();
+  return (manifest: DeclarativeManifest, projectId?: string) =>
+    resolveManifestBuilderProject({ workspaceId, builderProjectId: projectId, manifest }, requestOptions);
+};
+
+export const useBuilderProjectResolvedManifestSuspense = (manifest?: DeclarativeManifest, projectId?: string) => {
+  const resolveManifestQuery = useBuilderProjectResolveManifestQuery();
+
+  return useSuspenseQuery(connectorBuilderProjectsKeys.resolveSuspense(manifest), async () => {
+    if (!manifest) {
+      return DEFAULT_JSON_MANIFEST_VALUES_WITH_STREAM;
+    }
+    try {
+      return (await resolveManifestQuery(manifest, projectId)).manifest as DeclarativeComponentSchema;
+    } catch {
+      return null;
+    }
+  });
+};
+
+export const useResolveManifest = () => {
+  const workspaceId = useCurrentWorkspaceId();
+  const requestOptions = useRequestOptions();
+
+  const mutation = useMutation(
+    ({ manifestToResolve, projectId }: { manifestToResolve: DeclarativeComponentSchema; projectId?: string }) => {
+      return resolveManifestBuilderProject(
+        {
+          workspaceId,
+          builderProjectId: projectId,
+          manifest: {
+            ...manifestToResolve,
+            // normalize the manifest in the CDK to produce properly linked fields and parent stream references
+            __should_normalize: true,
+            __should_migrate: true,
+          },
+        },
+        requestOptions
+      );
+    }
+  );
+
+  return {
+    resolveManifest: mutation.mutateAsync, // Returns a promise that resolves with the result or rejects with error
+    isResolving: mutation.isLoading,
+    resolveError: mutation.error as HttpError<KnownExceptionInfo> | null,
+    resetResolveState: mutation.reset,
+  };
+};
+
+export const useBuilderProjectFullResolveManifest = (params: ConnectorBuilderProjectFullResolveRequestBody) => {
+  const requestOptions = useRequestOptions();
+
+  const projectId = params.builderProjectId;
+
+  return useQuery(
+    connectorBuilderProjectsKeys.fullResolve(projectId),
+    () => fullResolveManifestBuilderProject(params, requestOptions),
+    {
+      enabled: false,
+      refetchOnWindowFocus: false,
+    }
+  );
+};
+
+export const useCancelBuilderProjectStreamRead = (builderProjectId: string, streamName: string) => {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.cancelQueries(connectorBuilderProjectsKeys.read(builderProjectId, streamName));
+  };
 };
 
 export type Page = ConnectorBuilderProjectStreamReadSlicesItemPagesItem & {
@@ -526,8 +630,15 @@ export type StreamReadTransformedSlices = Omit<ConnectorBuilderProjectStreamRead
 
 const transformSlices = (
   streamReadData: ConnectorBuilderProjectStreamRead,
-  stream: DeclarativeStream
+  stream: DeclarativeComponentSchemaStreamsItem
 ): StreamReadTransformedSlices => {
+  if (
+    stream.type === StateDelegatingStreamType.StateDelegatingStream ||
+    stream.type === ConditionalStreamsType.ConditionalStreams
+  ) {
+    return streamReadData;
+  }
+
   // With the addition of ResumableFullRefresh, when pagination is configured and both incremental_sync and
   // partition_routers are NOT configured, the CDK splits up each page into a separate slice, each with its own state.
   // This is to allow full refresh syncs to resume from the last page read in the event of a failure.
@@ -598,6 +709,7 @@ export const useGetBuilderProjectBaseImage = (params: DeclarativeManifestRequest
   const requestOptions = useRequestOptions();
 
   return useQuery<DeclarativeManifestBaseImageRead>(
+    // @ts-expect-error TODO: connector builder team to fix this https://github.com/airbytehq/airbyte-internal-issues/issues/12252
     connectorBuilderProjectsKeys.getBaseImage(params.manifest.version),
     () => getDeclarativeManifestBaseImage(params, requestOptions)
   );
@@ -621,4 +733,96 @@ export const useGetBuilderProjectIdByDefinitionId = (sourceDefinitionId: string 
       };
     }
   );
+};
+
+export const GENERATE_CONTRIBUTION_NOTIFICATION_ID = "generate-contribution-notification";
+
+export const useBuilderGenerateContribution = () => {
+  const requestOptions = useRequestOptions();
+  const formatError = useFormatError();
+  const { registerNotification } = useNotificationService();
+  const analyticsService = useAnalyticsService();
+
+  return useMutation((params: GenerateContributionRequestBody) => generateContribution(params, requestOptions), {
+    onSuccess: (_date, params) => {
+      analyticsService.track(Namespace.CONNECTOR_BUILDER, Action.CONTRIBUTE_SUCCESS, {
+        actionDescription: "Connector contribution successfully submitted to airbyte repo",
+        connector_name: params.name,
+        connector_image_name: params.connector_image_name,
+      });
+    },
+    onError: (error: Error, params) => {
+      const errorMessage = formatError(error);
+      registerNotification({
+        id: GENERATE_CONTRIBUTION_NOTIFICATION_ID,
+        type: "error",
+        text: errorMessage,
+      });
+      analyticsService.track(Namespace.CONNECTOR_BUILDER, Action.CONTRIBUTE_FAILURE, {
+        actionDescription: "Connector contribution failed to be submitted to airbyte repo",
+        status_code: error instanceof HttpError ? error.status : undefined,
+        error_message: errorMessage,
+        connector_name: params.name,
+        connector_image_name: params.connector_image_name,
+      });
+    },
+  });
+};
+
+export const useBuilderCheckContribution = () => {
+  const requestOptions = useRequestOptions();
+  const queryClient = useQueryClient();
+
+  const getCachedCheck = useCallback(
+    (params: CheckContributionRequestBody) => {
+      const queryKey = connectorBuilderProjectsKeys.checkContribution(params.connector_image_name);
+      return queryClient.getQueryData<CheckContributionRead>(queryKey);
+    },
+    [queryClient]
+  );
+
+  const fetchContributionCheck = useCallback(
+    async (params: CheckContributionRequestBody) => {
+      try {
+        return await queryClient.fetchQuery<CheckContributionRead>(
+          connectorBuilderProjectsKeys.checkContribution(params.connector_image_name),
+          () => checkContribution(params, requestOptions)
+        );
+      } catch (error) {
+        return error as Error;
+      }
+    },
+    [queryClient, requestOptions]
+  );
+
+  return {
+    getCachedCheck,
+    fetchContributionCheck,
+  };
+};
+
+export const useBuilderCapabilities = () => {
+  const workspaceId = useCurrentWorkspaceId();
+  const requestOptions = useRequestOptions();
+  return useQuery<ConnectorBuilderCapabilities, HttpError<KnownExceptionInfo>>(["builderCapabilities"], () =>
+    getConnectorBuilderCapabilities({ workspaceId }, requestOptions)
+  );
+};
+
+/**
+ * Hook to check if custom components are enabled.
+ * Returns true if either the feature flag is enabled or the global override is set.
+ *
+ * PROBLEM TO WORKAROUND: We do not have the ability to set feature flags for OSS/Enterprise customers.
+ *
+ * HACK: We in stead use a global override from the server in the form of an environment variable AIRBYTE_ENABLE_UNSAFE_CODE.
+ *       Any customer can set this environment variable to enable unsafe code execution.
+ *
+ * TODO: Remove this when we have the ability to set feature flags for OSS/Enterprise customers.
+ * @returns boolean indicating if custom components are enabled
+ */
+export const useCustomComponentsEnabled = () => {
+  const areCustomComponentsEnabled = useExperiment("connectorBuilder.customComponents");
+  const { data } = useBuilderCapabilities();
+  return areCustomComponentsEnabled || data?.customCodeExecution;
 };

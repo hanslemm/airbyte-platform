@@ -25,8 +25,8 @@ describe("Source main actions", () => {
     cy.intercept("/api/v1/sources/create").as("createSource");
     createPostgresSource("Test source cypress");
 
-    cy.wait("@createSource", { timeout: 30000 }).then((interception) => {
-      assert("include", `/source/${interception.response?.body.Id}`);
+    cy.wait("@createSource", { timeout: 30000 }).then(({ response }) => {
+      cy.url().should("include", `/source/${response?.body.sourceId}`);
     });
   });
 
@@ -36,7 +36,7 @@ describe("Source main actions", () => {
     });
 
     cy.get("div[data-id='success-result']").should("exist");
-    cy.get("[data-testid='connectionConfiguration.pokemon_name']").contains("button", "ivysaur").should("exist");
+    cy.get("[data-testid='connectionConfiguration.pokemon_name-listbox-button']").contains("ivysaur").should("exist");
   });
 
   it("Can edit source again without leaving the page", () => {
@@ -45,7 +45,7 @@ describe("Source main actions", () => {
     });
 
     cy.get("div[data-id='success-result']").should("exist");
-    cy.get("[data-testid='connectionConfiguration.pokemon_name']").contains("button", "ivysaur").should("exist");
+    cy.get("[data-testid='connectionConfiguration.pokemon_name-listbox-button']").contains("ivysaur").should("exist");
     cy.get("button[type=submit]").should("be.disabled");
 
     updateField("connectionConfiguration.pokemon_name", "bulbasaur", true);

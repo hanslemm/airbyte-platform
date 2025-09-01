@@ -25,7 +25,6 @@ export const links = {
   syncModeLink: `${BASE_DOCS_LINK}/understanding-airbyte/connections`,
   sourceDefinedCursorLink: `${BASE_DOCS_LINK}/understanding-airbyte/connections/incremental-append-deduped/#source-defined-cursor`,
   sourceDefinedPKLink: `${BASE_DOCS_LINK}/understanding-airbyte/connections/incremental-append-deduped/#source-defined-primary-key`,
-  demoLink: "https://demo.airbyte.io",
   contactSales: "https://airbyte.com/talk-to-sales",
   webpageLink: "https://airbyte.com",
   webhookVideoGuideLink: "https://www.youtube.com/watch?v=NjYm8F-KiFc",
@@ -41,11 +40,12 @@ export const links = {
   connectorBuilderPagination: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/pagination`,
   connectorBuilderIncrementalSync: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/incremental-sync`,
   connectorBuilderErrorHandler: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/error-handling`,
-  connectorBuilderParentStream: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/partitioning#parent-stream`,
-  connectorBuilderParameterizedRequests: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/partitioning#parameterized-requests`,
+  connectorBuilderPartitioning: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/partitioning`,
   connectorBuilderTransformations: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/record-processing#transformations`,
   connectorBuilderTutorial: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/tutorial`,
   connectorBuilderAssist: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/ai-assist`,
+  connectorBuilderCustomComponents: `${BASE_DOCS_LINK}/connector-development/connector-builder-ui/custom-components`,
+  connectorBuilderStreamTemplates: `${BASE_DOCS_LINK}/platform/next/connector-development/connector-builder-ui/stream-templates`,
   interpolationVariableDocs: `${BASE_DOCS_LINK}/connector-development/config-based/understanding-the-yaml-file/reference`,
   interpolationMacroDocs: `${BASE_DOCS_LINK}/connector-development/config-based/understanding-the-yaml-file/reference#macros`,
   creditDescription: `${BASE_DOCS_LINK}/cloud/managing-airbyte-cloud/manage-credits#what-are-credits`,
@@ -59,8 +59,14 @@ export const links = {
   ossAuthentication: `${BASE_DOCS_LINK}/deploying-airbyte/integrations/authentication`,
   featureTalkToSales:
     "https://airbyte.com/company/talk-to-sales?utm_source=airbyte&utm_medium=product&utm_content=feature-{feature}",
+  sonarTalktoSales: "https://calendly.com/teo-airbyte/15min",
   billingNotificationsForm:
-    "https://airbyte.retool.com/form/f06009f2-aad6-4df4-bb54-41f3b17d50d2?orgId={organizationId}",
+    "https://airbyte.retool.com/form/f06009f2-aad6-4df4-bb54-41f3b17d50d2?orgId={organizationId}&email={email}",
+  connectionMappings: `${BASE_DOCS_LINK}/using-airbyte/mappings`,
+  dataActivationDocs: `${BASE_DOCS_LINK}/platform/next/move-data/elt-data-activation`,
+  ssoDocs: `${BASE_DOCS_LINK}/platform/access-management/sso`,
+  embeddedOnboardingDocs: `${BASE_DOCS_LINK}/ai-agents/embedded/widget/develop-your-app`,
+  fixIngress1_7: `${BASE_DOCS_LINK}/platform/next/deploying-airbyte/integrations/ingress-1-7`,
 } as const;
 
 export type OutboundLinks = typeof links;

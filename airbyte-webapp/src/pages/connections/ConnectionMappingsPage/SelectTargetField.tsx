@@ -11,10 +11,9 @@ import { Input } from "components/ui/Input";
 import { FloatLayout } from "components/ui/ListBox/FloatLayout";
 import { Text } from "components/ui/Text";
 
-import { useCurrentWorkspace } from "core/api";
 import { FieldSpec } from "core/api/types/AirbyteClient";
-import { useIntent } from "core/utils/rbac";
-import { useConnectionFormService } from "hooks/services/ConnectionForm/ConnectionFormService";
+import { useFormMode } from "core/services/ui/FormModeContext";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 
 import { MappingRowItem } from "./MappingRow";
 import styles from "./SelectTargetField.module.scss";
@@ -31,8 +30,7 @@ interface SelectTargetFieldProps<TFormValues> {
 export const SelectTargetField = <TFormValues extends FieldValues>({
   ...props
 }: SelectTargetFieldProps<TFormValues>) => {
-  const { workspaceId } = useCurrentWorkspace();
-  const canEditConnection = useIntent("EditConnection", { workspaceId });
+  const canEditConnection = useGeneratedIntent(Intent.CreateOrEditConnection);
   const { control } = useFormContext<TFormValues>();
 
   return (
@@ -121,7 +119,7 @@ const FieldComboBox: React.FC<FieldComboBoxProps> = ({
   hasError = false,
   disabled,
 }) => {
-  const { mode } = useConnectionFormService();
+  const { mode } = useFormMode();
   const [query, setQuery] = useState<string>("");
   const { formatMessage } = useIntl();
 

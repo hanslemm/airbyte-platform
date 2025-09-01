@@ -20,6 +20,7 @@ import {
 import { getWorkspaceId, setWorkspaceId } from "./workspace";
 
 const getApiUrl = (path: string): string => `${Cypress.env("AIRBYTE_SERVER_BASE_URL")}/api/v1${path}`;
+const DEFAULT_ORGANIZATION_ID = "00000000-0000-0000-0000-000000000000";
 
 const apiRequest = <T = void>(
   method: Cypress.HttpMethod,
@@ -34,11 +35,12 @@ const apiRequest = <T = void>(
   });
 
 export const requestWorkspaceId = () =>
-  apiRequest<{ workspaces: Array<{ workspaceId: string }> }>("POST", "/workspaces/list").then(
-    ({ workspaces: [{ workspaceId }] }) => {
-      setWorkspaceId(workspaceId);
-    }
-  );
+  apiRequest<{ workspaces: Array<{ workspaceId: string }> }>("POST", "/workspaces/list_by_organization_id", {
+    organizationId: DEFAULT_ORGANIZATION_ID,
+    pagination: { pageSize: 1, rowOffset: 0 },
+  }).then(({ workspaces: [{ workspaceId }] }) => {
+    setWorkspaceId(workspaceId);
+  });
 
 export const completeInitialSetup = () =>
   apiRequest("POST", "/workspaces/update", {

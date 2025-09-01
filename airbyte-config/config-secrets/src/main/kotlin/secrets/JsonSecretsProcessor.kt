@@ -10,10 +10,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.google.common.annotations.VisibleForTesting
 import com.google.common.base.Preconditions
 import io.airbyte.commons.constants.AirbyteSecretConstants
+import io.airbyte.commons.constants.AirbyteSecretConstants.AIRBYTE_SECRET_COORDINATE_PREFIX
 import io.airbyte.commons.json.JsonPaths
 import io.airbyte.commons.json.JsonSchemas
 import io.airbyte.commons.json.Jsons
-import io.airbyte.commons.util.MoreIterators
+import io.airbyte.domain.models.SecretStorage
 import io.airbyte.validation.json.JsonSchemaValidator
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.Optional
@@ -39,19 +40,19 @@ class JsonSecretsProcessor(
      */
     fun maskAllSecrets(
       json: JsonNode,
-      schema: JsonNode?,
+      schema: JsonNode,
     ): JsonNode {
       val pathsWithSecrets =
         JsonSchemas
           .collectPathsThatMeetCondition(
             schema,
           ) { node: JsonNode ->
-            MoreIterators
-              .toList(node.fields())
-              .stream()
-              .anyMatch { (key): Map.Entry<String, JsonNode> -> AirbyteSecretConstants.AIRBYTE_SECRET_FIELD == key }
+            node
+              .fields()
+              .asSequence()
+              .any { (key): Map.Entry<String, JsonNode> -> AirbyteSecretConstants.AIRBYTE_SECRET_FIELD == key }
           }.stream()
-          .map { jsonSchemaPath: List<JsonSchemas.FieldNameOrList?>? ->
+          .map { jsonSchemaPath: List<JsonSchemas.FieldNameOrList> ->
             JsonPaths.mapJsonSchemaPathToJsonPath(
               jsonSchemaPath,
             )
@@ -59,6 +60,35 @@ class JsonSecretsProcessor(
       var copy = Jsons.clone(json)
       for (path in pathsWithSecrets) {
         copy = JsonPaths.replaceAtString(copy, path, AirbyteSecretConstants.SECRETS_MASK)
+      }
+      return copy
+    }
+
+    /**
+     * Given a JSONSchema object and an object that conforms to that schema, return the coordinates of the secrets only
+     *
+     * @param configWithSecretReferences - config object with secret references
+     * @param schema - jsonschema object
+     * @return json object with only the secret coordinates returned.
+     *
+     */
+    fun simplifyAllSecrets(
+      configWithSecretReferences: ConfigWithSecretReferences,
+      showCoordinatesFromDefaultSecretStorage: Boolean,
+    ): JsonNode {
+      val pathsWithSecrets = configWithSecretReferences.referencedSecrets.keys
+      var copy = Jsons.clone(configWithSecretReferences.originalConfig)
+      for (path in pathsWithSecrets) {
+        val secretCoordinate = configWithSecretReferences.referencedSecrets[path]
+        if (secretCoordinate != null) {
+          val fullCoordinate = secretCoordinate.secretCoordinate.fullCoordinate
+          copy =
+            if (showCoordinatesFromDefaultSecretStorage || secretCoordinate.secretStorageId != SecretStorage.DEFAULT_SECRET_STORAGE_ID.value) {
+              JsonPaths.replaceAtString(copy, path, "$AIRBYTE_SECRET_COORDINATE_PREFIX$fullCoordinate")
+            } else {
+              JsonPaths.replaceAtString(copy, path, AirbyteSecretConstants.SECRETS_MASK)
+            }
+        }
       }
       return copy
     }
@@ -108,6 +138,25 @@ class JsonSecretsProcessor(
       return obj
     }
     return maskAllSecrets(obj, schema)
+  }
+
+  /**
+   * Returns a copy of the input ConfigWithSecretReferences's config object wherein any secret references are either
+   * resolved to their coordinates if they are stored in a non-default secret storage, or masked if they are stored in the default secret storage.
+   *
+   * @param schema Schema containing secret annotations
+   * @param configWithSecretReferences Config containing potentially secret fields
+   */
+  fun simplifySecretsForOutput(
+    configWithSecretReferences: ConfigWithSecretReferences,
+    schema: JsonNode,
+    showCoordinatesFromDefaultSecretStorage: Boolean,
+  ): JsonNode {
+    if (!isValidJsonSchema(schema)) {
+      logger.error { "The schema is not valid, the secret can't be hidden" }
+      return configWithSecretReferences.originalConfig
+    }
+    return simplifyAllSecrets(configWithSecretReferences, showCoordinatesFromDefaultSecretStorage)
   }
 
   /**

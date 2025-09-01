@@ -10,7 +10,6 @@ import io.airbyte.api.model.generated.ConnectionScheduleData
 import io.airbyte.api.model.generated.ConnectionScheduleDataCron
 import io.airbyte.api.model.generated.ConnectionScheduleType
 import io.airbyte.api.model.generated.ConnectionStatus
-import io.airbyte.api.model.generated.Geography
 import io.airbyte.publicApi.server.generated.models.ConnectionCreateRequest
 import io.airbyte.server.apis.publicapi.helpers.ConnectionHelper
 import java.util.UUID
@@ -47,9 +46,6 @@ object ConnectionCreateMapper {
     if (connectionCreateRequest.prefix != null) {
       connectionCreateOss.prefix = connectionCreateRequest.prefix
     }
-
-    // set geography
-    connectionCreateOss.geography = Geography.fromValue(connectionCreateRequest.dataResidency.toString())
 
     // set schedule
     if (connectionCreateRequest.schedule != null) {

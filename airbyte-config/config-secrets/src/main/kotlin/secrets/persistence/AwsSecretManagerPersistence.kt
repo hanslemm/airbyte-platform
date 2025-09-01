@@ -21,6 +21,8 @@ import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClientBuilder
 import com.google.common.base.Preconditions
 import io.airbyte.config.AwsRoleSecretPersistenceConfig
 import io.airbyte.config.secrets.SecretCoordinate
+import io.airbyte.config.secrets.SecretCoordinate.AirbyteManagedSecretCoordinate
+import io.airbyte.config.secrets.persistence.SecretPersistence.ImplementationTypes.AWS_SECRET_MANAGER
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micronaut.context.annotation.Requires
 import io.micronaut.context.annotation.Value
@@ -37,7 +39,7 @@ private val logger = KotlinLogging.logger {}
  * details.](https://sdk.amazonaws.com/java/api/latest/software/amazon/awssdk/services/secretsmanager/SecretsManagerClient.html#listSecretVersionIds--)
  */
 @Singleton
-@Requires(property = "airbyte.secret.persistence", pattern = "(?i)^aws_secret_manager$")
+@Requires(property = "airbyte.secret.persistence", pattern = "(?i)^$AWS_SECRET_MANAGER$")
 @Named("secretPersistence")
 class AwsSecretManagerPersistence(
   private val awsClient: AwsClient,
@@ -50,20 +52,23 @@ class AwsSecretManagerPersistence(
       secretString = awsCache.cache.getSecretString(coordinate.fullCoordinate)
     } catch (e: ResourceNotFoundException) {
       logger.warn { "Secret ${coordinate.fullCoordinate} not found" }
-      // Attempt to use up old bad secrets
-      // If this is just a read, this should work
-      // If this is for an update, we should read the secret, return it, and then create a new correctly versioned one and delete the bad one.
-      try {
-        secretString = awsCache.cache.getSecretString(coordinate.coordinateBase)
-      } catch (e: ResourceNotFoundException) {
-        logger.warn { "Secret ${coordinate.coordinateBase} not found" }
+
+      if (coordinate is AirbyteManagedSecretCoordinate) {
+        // Attempt to use up old bad secrets
+        // If this is just a read, this should work
+        // If this is for an update, we should read the secret, return it, and then create a new correctly versioned one and delete the bad one.
+        try {
+          secretString = awsCache.cache.getSecretString(coordinate.coordinateBase)
+        } catch (e: ResourceNotFoundException) {
+          logger.warn { "Secret ${coordinate.coordinateBase} not found" }
+        }
       }
     }
     return secretString
   }
 
   override fun write(
-    coordinate: SecretCoordinate,
+    coordinate: AirbyteManagedSecretCoordinate,
     payload: String,
   ) {
     Preconditions.checkArgument(payload.isNotEmpty(), "Payload shouldn't be empty")
@@ -135,7 +140,7 @@ class AwsSecretManagerPersistence(
    *
    * @param coordinate SecretCoordinate to delete.
    */
-  override fun delete(coordinate: SecretCoordinate) {
+  override fun delete(coordinate: AirbyteManagedSecretCoordinate) {
     // Clean up the old bad secrets we might have left behind
     deleteSecretId(coordinate.coordinateBase)
     // Clean up the actual versioned secrets we left behind

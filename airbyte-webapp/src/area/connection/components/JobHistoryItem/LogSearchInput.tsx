@@ -43,7 +43,7 @@ export const LogSearchInput = React.forwardRef<HTMLInputElement, LogSearchInputP
         <SearchInput
           ref={ref}
           value={inputValue}
-          onChange={(e) => onSearchTermChange(e.target.value)}
+          onChange={onSearchTermChange}
           onKeyDown={onSearchInputKeydown}
           placeholder={formatMessage({ id: "jobHistory.logs.searchPlaceholder" })}
           style={{ paddingRight: (hasHighlightedMatch ? width : 0) + 15 }}
@@ -69,7 +69,7 @@ export const LogSearchInput = React.forwardRef<HTMLInputElement, LogSearchInputP
                 aria-label={formatMessage({ id: "jobHistory.logs.nextMatchLabel" })}
                 disabled={matches.length <= 1}
                 onClick={scrollToNextMatch}
-                type="submit"
+                type="button"
               >
                 <Icon type="chevronRight" color={matches.length > 1 ? "affordance" : "disabled"} />
               </button>

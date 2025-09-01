@@ -9,7 +9,11 @@
 Renders the temporal.autoSetup value
 */}}
 {{- define "airbyte.temporal.autoSetup" }}
-    {{- .Values.temporal.autoSetup | default true }}
+	{{- if eq .Values.temporal.autoSetup nil }}
+    	{{- true }}
+	{{- else }}
+    	{{- .Values.temporal.autoSetup }}
+	{{- end }}
 {{- end }}
 
 {{/*
@@ -24,158 +28,10 @@ Renders the temporal.autoSetup environment variable
 {{- end }}
 
 {{/*
-Renders the temporal.database.engine value
-*/}}
-{{- define "airbyte.temporal.database.engine" }}
-    {{- .Values.temporal.database.engine | default "postgresql" }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.engine environment variable
-*/}}
-{{- define "airbyte.temporal.database.engine.env" }}
-- name: DB
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: DB
-{{- end }}
-
-{{/*
-Renders the temporal.database.host environment variable
-*/}}
-{{- define "airbyte.temporal.database.host.env" }}
-- name: POSTGRES_SEEDS
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: DATABASE_HOST
-{{- end }}
-
-{{/*
-Renders the temporal.database.port environment variable
-*/}}
-{{- define "airbyte.temporal.database.port.env" }}
-- name: DB_PORT
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: DATABASE_PORT
-{{- end }}
-
-{{/*
-Renders the temporal.database.user secret key
-*/}}
-{{- define "airbyte.temporal.database.user.secretKey" }}
-	{{- .Values.temporal.database.userSecretKey | default "DATABASE_USER" }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.user environment variable
-*/}}
-{{- define "airbyte.temporal.database.user.env" }}
-- name: POSTGRES_USER
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "airbyte.database.secretName" . }}
-      key: {{ include "airbyte.temporal.database.user.secretKey" . }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.password secret key
-*/}}
-{{- define "airbyte.temporal.database.password.secretKey" }}
-	{{- .Values.temporal.database.passwordSecretKey | default "DATABASE_PASSWORD" }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.password environment variable
-*/}}
-{{- define "airbyte.temporal.database.password.env" }}
-- name: POSTGRES_PWD
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "airbyte.database.secretName" . }}
-      key: {{ include "airbyte.temporal.database.password.secretKey" . }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.tlsEnabled value
-*/}}
-{{- define "airbyte.temporal.database.tlsEnabled" }}
-    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.tlsEnabled environment variable
-*/}}
-{{- define "airbyte.temporal.database.tlsEnabled.env" }}
-- name: POSTGRES_TLS_ENABLED
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: POSTGRES_TLS_ENABLED
-{{- end }}
-
-{{/*
-Renders the temporal.database.tlsDisableHostVerification value
-*/}}
-{{- define "airbyte.temporal.database.tlsDisableHostVerification" }}
-    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.tlsDisableHostVerification environment variable
-*/}}
-{{- define "airbyte.temporal.database.tlsDisableHostVerification.env" }}
-- name: POSTGRES_TLS_DISABLE_HOST_VERIFICATION
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: POSTGRES_TLS_DISABLE_HOST_VERIFICATION
-{{- end }}
-
-{{/*
-Renders the temporal.database.sqlTlsEnabled value
-*/}}
-{{- define "airbyte.temporal.database.sqlTlsEnabled" }}
-    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.sqlTlsEnabled environment variable
-*/}}
-{{- define "airbyte.temporal.database.sqlTlsEnabled.env" }}
-- name: SQL_TLS_ENABLED
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: SQL_TLS_ENABLED
-{{- end }}
-
-{{/*
-Renders the temporal.database.sqlTlsDisableHostVerification value
-*/}}
-{{- define "airbyte.temporal.database.sqlTlsDisableHostVerification" }}
-    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
-{{- end }}
-
-{{/*
-Renders the temporal.database.sqlTlsDisableHostVerification environment variable
-*/}}
-{{- define "airbyte.temporal.database.sqlTlsDisableHostVerification.env" }}
-- name: SQL_TLS_DISABLE_HOST_VERIFICATION
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: SQL_TLS_DISABLE_HOST_VERIFICATION
-{{- end }}
-
-{{/*
 Renders the temporal.host value
 */}}
 {{- define "airbyte.temporal.host" }}
-    {{- (printf "%s-temporal:%d" .Release.Name (int .Values.temporal.service.port)) }}
+    {{- ternary (include "airbyte.temporal.cloud.host" .) (printf "%s-temporal:%d" .Release.Name (int .Values.temporal.service.port)) (eq (include "airbyte.temporal.cloud.enabled" .) "true") }}
 {{- end }}
 
 {{/*
@@ -230,15 +86,6 @@ Renders the set of all temporal environment variables
 */}}
 {{- define "airbyte.temporal.envs" }}
 {{- include "airbyte.temporal.autoSetup.env" . }}
-{{- include "airbyte.temporal.database.engine.env" . }}
-{{- include "airbyte.temporal.database.host.env" . }}
-{{- include "airbyte.temporal.database.port.env" . }}
-{{- include "airbyte.temporal.database.user.env" . }}
-{{- include "airbyte.temporal.database.password.env" . }}
-{{- include "airbyte.temporal.database.tlsEnabled.env" . }}
-{{- include "airbyte.temporal.database.tlsDisableHostVerification.env" . }}
-{{- include "airbyte.temporal.database.sqlTlsEnabled.env" . }}
-{{- include "airbyte.temporal.database.sqlTlsDisableHostVerification.env" . }}
 {{- include "airbyte.temporal.host.env" . }}
 {{- include "airbyte.temporal.configFilePath.env" . }}
 {{- include "airbyte.temporal.prometheus.endpoint.env" . }}
@@ -249,11 +96,6 @@ Renders the set of all temporal config map variables
 */}}
 {{- define "airbyte.temporal.configVars" }}
 AUTO_SETUP: {{ include "airbyte.temporal.autoSetup" . | quote }}
-DB: {{ include "airbyte.temporal.database.engine" . | quote }}
-POSTGRES_TLS_ENABLED: {{ include "airbyte.temporal.database.tlsEnabled" . | quote }}
-POSTGRES_TLS_DISABLE_HOST_VERIFICATION: {{ include "airbyte.temporal.database.tlsDisableHostVerification" . | quote }}
-SQL_TLS_ENABLED: {{ include "airbyte.temporal.database.sqlTlsEnabled" . | quote }}
-SQL_TLS_DISABLE_HOST_VERIFICATION: {{ include "airbyte.temporal.database.sqlTlsDisableHostVerification" . | quote }}
 TEMPORAL_HOST: {{ include "airbyte.temporal.host" . | quote }}
 DYNAMIC_CONFIG_FILE_PATH: {{ include "airbyte.temporal.configFilePath" . | quote }}
 PROMETHEUS_ENDPOINT: {{ include "airbyte.temporal.prometheus.endpoint" . | quote }}
@@ -386,8 +228,8 @@ TEMPORAL_CLI_TLS_KEY: {{ include "airbyte.temporal.cli.tlsKey" . | quote }}
 Renders the temporal.cloud secret name
 */}}
 {{- define "airbyte.temporal.cloud.secretName" }}
-{{- if .Values.global.temporal.cloud.secretName }}
-    {{- .Values.global.temporal.cloud.secretName }}
+{{- if .Values.global.temporal.secretName }}
+    {{- .Values.global.temporal.secretName }}
 {{- else }}
     {{- .Values.global.secretName | default (printf "%s-airbyte-secrets" .Release.Name) }}
 {{- end }}
@@ -397,7 +239,11 @@ Renders the temporal.cloud secret name
 Renders the global.temporal.cloud.enabled value
 */}}
 {{- define "airbyte.temporal.cloud.enabled" }}
-    {{- .Values.global.temporal.cloud.enabled | default false }}
+	{{- if eq .Values.global.temporal.cloud.enabled nil }}
+    	{{- false }}
+	{{- else }}
+    	{{- .Values.global.temporal.cloud.enabled }}
+	{{- end }}
 {{- end }}
 
 {{/*
@@ -409,74 +255,6 @@ Renders the temporal.cloud.enabled environment variable
     configMapKeyRef:
       name: {{ .Release.Name }}-airbyte-env
       key: TEMPORAL_CLOUD_ENABLED
-{{- end }}
-
-{{/*
-Renders the global.temporal.cloud.clientCert value
-*/}}
-{{- define "airbyte.temporal.cloud.clientCert" }}
-    {{- .Values.global.temporal.cloud.clientCert }}
-{{- end }}
-
-{{/*
-Renders the temporal.cloud.clientCert secret key
-*/}}
-{{- define "airbyte.temporal.cloud.clientCert.secretKey" }}
-	{{- .Values.global.temporal.cloud.clientCertSecretKey | default "TEMPORAL_CLOUD_CLIENT_CERT" }}
-{{- end }}
-
-{{/*
-Renders the temporal.cloud.clientCert environment variable
-*/}}
-{{- define "airbyte.temporal.cloud.clientCert.env" }}
-- name: TEMPORAL_CLOUD_CLIENT_CERT
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "airbyte.temporal.cloud.secretName" . }}
-      key: {{ include "airbyte.temporal.cloud.clientCert.secretKey" . }}
-{{- end }}
-
-{{/*
-Renders the global.temporal.cloud.clientKey value
-*/}}
-{{- define "airbyte.temporal.cloud.clientKey" }}
-    {{- .Values.global.temporal.cloud.clientKey }}
-{{- end }}
-
-{{/*
-Renders the temporal.cloud.clientKey secret key
-*/}}
-{{- define "airbyte.temporal.cloud.clientKey.secretKey" }}
-	{{- .Values.global.temporal.cloud.clientKeySecretKey | default "TEMPORAL_CLOUD_CLIENT_KEY" }}
-{{- end }}
-
-{{/*
-Renders the temporal.cloud.clientKey environment variable
-*/}}
-{{- define "airbyte.temporal.cloud.clientKey.env" }}
-- name: TEMPORAL_CLOUD_CLIENT_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "airbyte.temporal.cloud.secretName" . }}
-      key: {{ include "airbyte.temporal.cloud.clientKey.secretKey" . }}
-{{- end }}
-
-{{/*
-Renders the global.temporal.cloud.namespace value
-*/}}
-{{- define "airbyte.temporal.cloud.namespace" }}
-    {{- .Values.global.temporal.cloud.namespace }}
-{{- end }}
-
-{{/*
-Renders the temporal.cloud.namespace environment variable
-*/}}
-{{- define "airbyte.temporal.cloud.namespace.env" }}
-- name: TEMPORAL_CLOUD_NAMESPACE
-  valueFrom:
-    configMapKeyRef:
-      name: {{ .Release.Name }}-airbyte-env
-      key: TEMPORAL_CLOUD_NAMESPACE
 {{- end }}
 
 {{/*
@@ -498,14 +276,30 @@ Renders the temporal.cloud.host environment variable
 {{- end }}
 
 {{/*
+Renders the global.temporal.cloud.namespace value
+*/}}
+{{- define "airbyte.temporal.cloud.namespace" }}
+    {{- .Values.global.temporal.cloud.namespace }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.namespace environment variable
+*/}}
+{{- define "airbyte.temporal.cloud.namespace.env" }}
+- name: TEMPORAL_CLOUD_NAMESPACE
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: TEMPORAL_CLOUD_NAMESPACE
+{{- end }}
+
+{{/*
 Renders the set of all temporal.cloud environment variables
 */}}
 {{- define "airbyte.temporal.cloud.envs" }}
 {{- include "airbyte.temporal.cloud.enabled.env" . }}
-{{- include "airbyte.temporal.cloud.clientCert.env" . }}
-{{- include "airbyte.temporal.cloud.clientKey.env" . }}
-{{- include "airbyte.temporal.cloud.namespace.env" . }}
 {{- include "airbyte.temporal.cloud.host.env" . }}
+{{- include "airbyte.temporal.cloud.namespace.env" . }}
 {{- end }}
 
 {{/*
@@ -513,16 +307,432 @@ Renders the set of all temporal.cloud config map variables
 */}}
 {{- define "airbyte.temporal.cloud.configVars" }}
 TEMPORAL_CLOUD_ENABLED: {{ include "airbyte.temporal.cloud.enabled" . | quote }}
-TEMPORAL_CLOUD_NAMESPACE: {{ include "airbyte.temporal.cloud.namespace" . | quote }}
 TEMPORAL_CLOUD_HOST: {{ include "airbyte.temporal.cloud.host" . | quote }}
+TEMPORAL_CLOUD_NAMESPACE: {{ include "airbyte.temporal.cloud.namespace" . | quote }}
 {{- end }}
 
 {{/*
-Renders the set of all temporal.cloud secret variables
+Renders the temporal.cloud.billing secret name
 */}}
-{{- define "airbyte.temporal.cloud.secrets" }}
-TEMPORAL_CLOUD_CLIENT_CERT: {{ include "airbyte.temporal.cloud.clientCert" . | quote }}
-TEMPORAL_CLOUD_CLIENT_KEY: {{ include "airbyte.temporal.cloud.clientKey" . | quote }}
+{{- define "airbyte.temporal.cloud.billing.secretName" }}
+{{- if .Values.global.temporal.secretName }}
+    {{- .Values.global.temporal.secretName }}
+{{- else }}
+    {{- .Values.global.secretName | default (printf "%s-airbyte-secrets" .Release.Name) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Renders the global.temporal.cloud.billing.host value
+*/}}
+{{- define "airbyte.temporal.cloud.billing.host" }}
+    {{- .Values.global.temporal.cloud.billing.host }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.billing.host environment variable
+*/}}
+{{- define "airbyte.temporal.cloud.billing.host.env" }}
+- name: TEMPORAL_CLOUD_BILLING_HOST
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: TEMPORAL_CLOUD_BILLING_HOST
+{{- end }}
+
+{{/*
+Renders the global.temporal.cloud.billing.namespace value
+*/}}
+{{- define "airbyte.temporal.cloud.billing.namespace" }}
+    {{- .Values.global.temporal.cloud.billing.namespace }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.billing.namespace environment variable
+*/}}
+{{- define "airbyte.temporal.cloud.billing.namespace.env" }}
+- name: TEMPORAL_CLOUD_BILLING_NAMESPACE
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: TEMPORAL_CLOUD_BILLING_NAMESPACE
+{{- end }}
+
+{{/*
+Renders the set of all temporal.cloud.billing environment variables
+*/}}
+{{- define "airbyte.temporal.cloud.billing.envs" }}
+{{- include "airbyte.temporal.cloud.billing.host.env" . }}
+{{- include "airbyte.temporal.cloud.billing.namespace.env" . }}
+{{- end }}
+
+{{/*
+Renders the set of all temporal.cloud.billing config map variables
+*/}}
+{{- define "airbyte.temporal.cloud.billing.configVars" }}
+TEMPORAL_CLOUD_BILLING_HOST: {{ include "airbyte.temporal.cloud.billing.host" . | quote }}
+TEMPORAL_CLOUD_BILLING_NAMESPACE: {{ include "airbyte.temporal.cloud.billing.namespace" . | quote }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.connectorRollout secret name
+*/}}
+{{- define "airbyte.temporal.cloud.connectorRollout.secretName" }}
+{{- if .Values.global.temporal.secretName }}
+    {{- .Values.global.temporal.secretName }}
+{{- else }}
+    {{- .Values.global.secretName | default (printf "%s-airbyte-secrets" .Release.Name) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Renders the global.temporal.cloud.connectorRollout.host value
+*/}}
+{{- define "airbyte.temporal.cloud.connectorRollout.host" }}
+    {{- .Values.global.temporal.cloud.connectorRollout.host }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.connectorRollout.host environment variable
+*/}}
+{{- define "airbyte.temporal.cloud.connectorRollout.host.env" }}
+- name: TEMPORAL_CLOUD_HOST_CONNECTOR_ROLLOUT
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: TEMPORAL_CLOUD_HOST_CONNECTOR_ROLLOUT
+{{- end }}
+
+{{/*
+Renders the global.temporal.cloud.connectorRollout.namespace value
+*/}}
+{{- define "airbyte.temporal.cloud.connectorRollout.namespace" }}
+    {{- .Values.global.temporal.cloud.connectorRollout.namespace }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.connectorRollout.namespace environment variable
+*/}}
+{{- define "airbyte.temporal.cloud.connectorRollout.namespace.env" }}
+- name: TEMPORAL_CLOUD_NAMESPACE_CONNECTOR_ROLLOUT
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: TEMPORAL_CLOUD_NAMESPACE_CONNECTOR_ROLLOUT
+{{- end }}
+
+{{/*
+Renders the set of all temporal.cloud.connectorRollout environment variables
+*/}}
+{{- define "airbyte.temporal.cloud.connectorRollout.envs" }}
+{{- include "airbyte.temporal.cloud.connectorRollout.host.env" . }}
+{{- include "airbyte.temporal.cloud.connectorRollout.namespace.env" . }}
+{{- end }}
+
+{{/*
+Renders the set of all temporal.cloud.connectorRollout config map variables
+*/}}
+{{- define "airbyte.temporal.cloud.connectorRollout.configVars" }}
+TEMPORAL_CLOUD_HOST_CONNECTOR_ROLLOUT: {{ include "airbyte.temporal.cloud.connectorRollout.host" . | quote }}
+TEMPORAL_CLOUD_NAMESPACE_CONNECTOR_ROLLOUT: {{ include "airbyte.temporal.cloud.connectorRollout.namespace" . | quote }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.credentials secret name
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.secretName" }}
+{{- if .Values.global.temporal.secretName }}
+    {{- .Values.global.temporal.secretName }}
+{{- else }}
+    {{- .Values.global.secretName | default (printf "%s-airbyte-secrets" .Release.Name) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Renders the global.temporal.cloud.clientCert value
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.clientCert" }}
+    {{- .Values.global.temporal.cloud.clientCert }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.credentials.clientCert secret key
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.clientCert.secretKey" }}
+	{{- .Values.global.temporal.cloud.clientCertSecretKey | default "TEMPORAL_CLOUD_CLIENT_CERT" }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.credentials.clientCert environment variable
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.clientCert.env" }}
+- name: TEMPORAL_CLOUD_CLIENT_CERT
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "airbyte.temporal.cloud.secretName" . }}
+      key: {{ include "airbyte.temporal.cloud.credentials.clientCert.secretKey" . }}
+{{- end }}
+
+{{/*
+Renders the global.temporal.cloud.clientKey value
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.clientKey" }}
+    {{- .Values.global.temporal.cloud.clientKey }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.credentials.clientKey secret key
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.clientKey.secretKey" }}
+	{{- .Values.global.temporal.cloud.clientKeySecretKey | default "TEMPORAL_CLOUD_CLIENT_KEY" }}
+{{- end }}
+
+{{/*
+Renders the temporal.cloud.credentials.clientKey environment variable
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.clientKey.env" }}
+- name: TEMPORAL_CLOUD_CLIENT_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "airbyte.temporal.cloud.secretName" . }}
+      key: {{ include "airbyte.temporal.cloud.credentials.clientKey.secretKey" . }}
+{{- end }}
+
+{{/*
+Renders the set of all temporal.cloud.credentials environment variables
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.envs" }}
+{{- include "airbyte.temporal.cloud.credentials.clientCert.env" . }}
+{{- include "airbyte.temporal.cloud.credentials.clientKey.env" . }}
+{{- end }}
+
+{{/*
+Renders the set of all temporal.cloud.credentials secret variables
+*/}}
+{{- define "airbyte.temporal.cloud.credentials.secrets" }}
+TEMPORAL_CLOUD_CLIENT_CERT: {{ include "airbyte.temporal.cloud.credentials.clientCert" . | quote }}
+TEMPORAL_CLOUD_CLIENT_KEY: {{ include "airbyte.temporal.cloud.credentials.clientKey" . | quote }}
+{{- end }}
+
+{{/*
+Renders the temporal.database secret name
+*/}}
+{{- define "airbyte.temporal.database.secretName" }}
+{{- if .Values.temporal.database.secretName }}
+    {{- .Values.temporal.database.secretName }}
+{{- else }}
+    {{- .Values.global.secretName | default (printf "%s-airbyte-secrets" .Release.Name) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.engine value
+*/}}
+{{- define "airbyte.temporal.database.engine" }}
+    {{- .Values.temporal.database.engine | default "postgresql" }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.engine environment variable
+*/}}
+{{- define "airbyte.temporal.database.engine.env" }}
+- name: DB
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: DB
+{{- end }}
+
+{{/*
+Renders the temporal.database.host value
+*/}}
+{{- define "airbyte.temporal.database.host" }}
+    {{- .Values.temporal.database.host }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.host environment variable
+*/}}
+{{- define "airbyte.temporal.database.host.env" }}
+- name: POSTGRES_SEEDS
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: DATABASE_HOST
+{{- end }}
+
+{{/*
+Renders the temporal.database.port value
+*/}}
+{{- define "airbyte.temporal.database.port" }}
+    {{- .Values.temporal.database.port }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.port environment variable
+*/}}
+{{- define "airbyte.temporal.database.port.env" }}
+- name: DB_PORT
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: DATABASE_PORT
+{{- end }}
+
+{{/*
+Renders the temporal.database.user value
+*/}}
+{{- define "airbyte.temporal.database.user" }}
+    {{- .Values.temporal.database.user }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.user secret key
+*/}}
+{{- define "airbyte.temporal.database.user.secretKey" }}
+	{{- .Values.temporal.database.userSecretKey | default (include "airbyte.database.user.secretKey" .) }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.user environment variable
+*/}}
+{{- define "airbyte.temporal.database.user.env" }}
+- name: POSTGRES_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "airbyte.database.secretName" . }}
+      key: {{ include "airbyte.temporal.database.user.secretKey" . }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.password value
+*/}}
+{{- define "airbyte.temporal.database.password" }}
+    {{- .Values.temporal.database.password }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.password secret key
+*/}}
+{{- define "airbyte.temporal.database.password.secretKey" }}
+	{{- .Values.temporal.database.passwordSecretKey | default (include "airbyte.database.password.secretKey" .) }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.password environment variable
+*/}}
+{{- define "airbyte.temporal.database.password.env" }}
+- name: POSTGRES_PWD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "airbyte.database.secretName" . }}
+      key: {{ include "airbyte.temporal.database.password.secretKey" . }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.tlsEnabled value
+*/}}
+{{- define "airbyte.temporal.database.tlsEnabled" }}
+    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.tlsEnabled environment variable
+*/}}
+{{- define "airbyte.temporal.database.tlsEnabled.env" }}
+- name: POSTGRES_TLS_ENABLED
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: POSTGRES_TLS_ENABLED
+{{- end }}
+
+{{/*
+Renders the temporal.database.tlsDisableHostVerification value
+*/}}
+{{- define "airbyte.temporal.database.tlsDisableHostVerification" }}
+    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.tlsDisableHostVerification environment variable
+*/}}
+{{- define "airbyte.temporal.database.tlsDisableHostVerification.env" }}
+- name: POSTGRES_TLS_DISABLE_HOST_VERIFICATION
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: POSTGRES_TLS_DISABLE_HOST_VERIFICATION
+{{- end }}
+
+{{/*
+Renders the temporal.database.sqlTlsEnabled value
+*/}}
+{{- define "airbyte.temporal.database.sqlTlsEnabled" }}
+    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.sqlTlsEnabled environment variable
+*/}}
+{{- define "airbyte.temporal.database.sqlTlsEnabled.env" }}
+- name: SQL_TLS_ENABLED
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: SQL_TLS_ENABLED
+{{- end }}
+
+{{/*
+Renders the temporal.database.sqlTlsDisableHostVerification value
+*/}}
+{{- define "airbyte.temporal.database.sqlTlsDisableHostVerification" }}
+    {{- ternary "true" "false" (eq .Values.global.database.type "external") }}
+{{- end }}
+
+{{/*
+Renders the temporal.database.sqlTlsDisableHostVerification environment variable
+*/}}
+{{- define "airbyte.temporal.database.sqlTlsDisableHostVerification.env" }}
+- name: SQL_TLS_DISABLE_HOST_VERIFICATION
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: SQL_TLS_DISABLE_HOST_VERIFICATION
+{{- end }}
+
+{{/*
+Renders the set of all temporal.database environment variables
+*/}}
+{{- define "airbyte.temporal.database.envs" }}
+{{- include "airbyte.temporal.database.engine.env" . }}
+{{- include "airbyte.temporal.database.host.env" . }}
+{{- include "airbyte.temporal.database.port.env" . }}
+{{- include "airbyte.temporal.database.user.env" . }}
+{{- include "airbyte.temporal.database.password.env" . }}
+{{- include "airbyte.temporal.database.tlsEnabled.env" . }}
+{{- include "airbyte.temporal.database.tlsDisableHostVerification.env" . }}
+{{- include "airbyte.temporal.database.sqlTlsEnabled.env" . }}
+{{- include "airbyte.temporal.database.sqlTlsDisableHostVerification.env" . }}
+{{- end }}
+
+{{/*
+Renders the set of all temporal.database config map variables
+*/}}
+{{- define "airbyte.temporal.database.configVars" }}
+DB: {{ include "airbyte.temporal.database.engine" . | quote }}
+POSTGRES_TLS_ENABLED: {{ include "airbyte.temporal.database.tlsEnabled" . | quote }}
+POSTGRES_TLS_DISABLE_HOST_VERIFICATION: {{ include "airbyte.temporal.database.tlsDisableHostVerification" . | quote }}
+SQL_TLS_ENABLED: {{ include "airbyte.temporal.database.sqlTlsEnabled" . | quote }}
+SQL_TLS_DISABLE_HOST_VERIFICATION: {{ include "airbyte.temporal.database.sqlTlsDisableHostVerification" . | quote }}
+{{- end }}
+
+{{/*
+Renders the set of all temporal.database secret variables
+*/}}
+{{- define "airbyte.temporal.database.secrets" }}
+POSTGRES_USER: {{ include "airbyte.temporal.database.user" . | quote }}
+POSTGRES_PWD: {{ include "airbyte.temporal.database.password" . | quote }}
 {{- end }}
 
 {{/*

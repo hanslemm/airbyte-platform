@@ -18,6 +18,7 @@ dependencies {
   implementation(libs.bundles.micronaut.data.jdbc)
   implementation(libs.bundles.datadog)
   implementation(libs.guava)
+  implementation("org.springframework.security:spring-security-crypto:6.3.8")
   implementation(project(":oss:airbyte-api:server-api"))
   implementation(project(":oss:airbyte-commons"))
   implementation(project(":oss:airbyte-commons-auth"))
@@ -28,6 +29,7 @@ dependencies {
   implementation(project(":oss:airbyte-config:config-secrets"))
   implementation(project(":oss:airbyte-db:db-lib"))
   implementation(project(":oss:airbyte-db:jooq"))
+  implementation(project(":oss:airbyte-domain:models"))
   implementation(project(":oss:airbyte-json-validation"))
   implementation(project(":oss:airbyte-featureflag"))
   implementation(libs.airbyte.protocol)
@@ -43,6 +45,7 @@ dependencies {
   testImplementation(project(":oss:airbyte-test-utils"))
   testImplementation(libs.bundles.junit)
   testImplementation(libs.bundles.kotest)
+  testImplementation(libs.mockito.kotlin)
 
   // TODO: flip this import - MockData should live in airbyte-data's testFixtures
   // and be imported in this manner by config-persistence

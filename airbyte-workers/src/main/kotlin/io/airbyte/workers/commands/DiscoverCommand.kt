@@ -10,14 +10,16 @@ import io.airbyte.commons.logging.LogClientManager
 import io.airbyte.commons.temporal.TemporalUtils
 import io.airbyte.config.ActorType
 import io.airbyte.config.ConnectorJobOutput
+import io.airbyte.config.WorkloadPriority
+import io.airbyte.config.WorkloadType
+import io.airbyte.workers.input.isReset
 import io.airbyte.workers.models.DiscoverCatalogInput
 import io.airbyte.workers.pod.Metadata
 import io.airbyte.workers.sync.WorkloadClient
+import io.airbyte.workers.workload.DataplaneGroupResolver
 import io.airbyte.workers.workload.WorkloadIdGenerator
-import io.airbyte.workload.api.client.model.generated.WorkloadCreateRequest
-import io.airbyte.workload.api.client.model.generated.WorkloadLabel
-import io.airbyte.workload.api.client.model.generated.WorkloadPriority.Companion.decode
-import io.airbyte.workload.api.client.model.generated.WorkloadType
+import io.airbyte.workload.api.domain.WorkloadCreateRequest
+import io.airbyte.workload.api.domain.WorkloadLabel
 import io.micronaut.context.annotation.Property
 import jakarta.inject.Named
 import jakarta.inject.Singleton
@@ -33,6 +35,7 @@ class DiscoverCommand(
   @Property(name = "airbyte.worker.discover.auto-refresh-window") discoverAutoRefreshWindowMinutes: Int,
   private val workloadIdGenerator: WorkloadIdGenerator,
   private val logClientManager: LogClientManager,
+  private val dataplaneGroupResolver: DataplaneGroupResolver,
 ) : WorkloadCommandBase<DiscoverCatalogInput>(
     airbyteApiClient = airbyteApiClient,
     workloadClient = workloadClient,
@@ -50,7 +53,7 @@ class DiscoverCommand(
     input: DiscoverCatalogInput,
     signalPayload: String?,
   ): String {
-    if (isAutoRefresh(input) && discoverAutoRefreshWindow == Duration.INFINITE) {
+    if (input.launcherConfig.isReset() || (isAutoRefresh(input) && discoverAutoRefreshWindow == Duration.INFINITE)) {
       return NOOP_DISCOVER_PLACEHOLDER_ID
     }
     return super.start(input, signalPayload)
@@ -77,8 +80,7 @@ class DiscoverCommand(
     val jobId = input.jobRunConfig.jobId
     val attemptNumber = if (input.jobRunConfig.attemptId == null) 0 else Math.toIntExact(input.jobRunConfig.attemptId)
     val workloadId =
-      if (input.discoverCatalogInput.manual
-      ) {
+      if (input.discoverCatalogInput.manual) {
         workloadIdGenerator.generateDiscoverWorkloadId(
           input.discoverCatalogInput.actorContext.actorDefinitionId,
           jobId,
@@ -95,6 +97,13 @@ class DiscoverCommand(
     val serializedInput = Jsons.serialize(input)
 
     val workspaceId = input.discoverCatalogInput.actorContext.workspaceId
+    val organizationId = input.discoverCatalogInput.actorContext.organizationId
+    val dataplaneGroup =
+      dataplaneGroupResolver.resolveForDiscover(
+        organizationId = organizationId,
+        workspaceId = workspaceId,
+        actorId = input.discoverCatalogInput.actorContext.actorId,
+      )
 
     return WorkloadCreateRequest(
       workloadId = workloadId,
@@ -111,10 +120,13 @@ class DiscoverCommand(
           ),
         ),
       workloadInput = serializedInput,
+      workspaceId = workspaceId,
+      organizationId = organizationId,
       logPath = logClientManager.fullLogPath(TemporalUtils.getJobRoot(workspaceRoot, jobId, attemptNumber.toLong())),
       type = WorkloadType.DISCOVER,
-      priority = decode(input.launcherConfig.priority.toString())!!,
+      priority = WorkloadPriority.fromValue(input.launcherConfig.priority.toString())!!,
       signalInput = signalPayload,
+      dataplaneGroup = dataplaneGroup,
     )
   }
 

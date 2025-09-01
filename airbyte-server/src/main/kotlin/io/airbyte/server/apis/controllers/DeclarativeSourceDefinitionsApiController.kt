@@ -9,7 +9,7 @@ import io.airbyte.api.model.generated.DeclarativeManifestsReadList
 import io.airbyte.api.model.generated.DeclarativeSourceDefinitionCreateManifestRequestBody
 import io.airbyte.api.model.generated.ListDeclarativeManifestsRequestBody
 import io.airbyte.api.model.generated.UpdateActiveManifestRequestBody
-import io.airbyte.commons.auth.AuthRoleConstants
+import io.airbyte.commons.auth.roles.AuthRoleConstants
 import io.airbyte.commons.server.handlers.DeclarativeSourceDefinitionsHandler
 import io.airbyte.commons.server.scheduling.AirbyteTaskExecutors
 import io.airbyte.server.apis.execute
@@ -27,7 +27,7 @@ import io.micronaut.security.rules.SecurityRule
 @Context
 @Secured(SecurityRule.IS_AUTHENTICATED)
 class DeclarativeSourceDefinitionsApiController(
-  @param:Body private val handler: DeclarativeSourceDefinitionsHandler,
+  private val handler: DeclarativeSourceDefinitionsHandler,
 ) : DeclarativeSourceDefinitionsApi {
   @Post(uri = "/create_manifest")
   @Status(HttpStatus.CREATED)

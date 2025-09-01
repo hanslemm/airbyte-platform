@@ -4,19 +4,17 @@ import { Box } from "components/ui/Box";
 import { FlexContainer } from "components/ui/Flex";
 import { Heading } from "components/ui/Heading";
 
-import { UpdateWorkspaceNameForm } from "area/workspace/components/UpdateWorkspaceNameForm";
-import { useCurrentWorkspace } from "core/api";
+import { UpdateWorkspaceSettingsForm } from "area/workspace/components/UpdateWorkspaceSettingsForm";
 import { useFeature, FeatureItem } from "core/services/features";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 
 import { TagsTable } from "./components/TagsTable";
 import { DeleteWorkspace } from "../components/DeleteWorkspace";
 
 export const GeneralWorkspaceSettingsPage = () => {
   const multiWorkspaceUI = useFeature(FeatureItem.MultiWorkspaceUI);
-  const { workspaceId } = useCurrentWorkspace();
-  const canViewWorkspaceSettings = useIntent("ViewWorkspaceSettings", { workspaceId });
-  const canDeleteWorkspace = useIntent("DeleteWorkspace", { workspaceId });
+  const canViewWorkspaceSettings = useGeneratedIntent(Intent.ViewWorkspaceSettings);
+  const canDeleteWorkspace = useGeneratedIntent(Intent.DeleteWorkspace);
 
   return (
     <FlexContainer direction="column" gap="xl">
@@ -25,7 +23,7 @@ export const GeneralWorkspaceSettingsPage = () => {
           <FormattedMessage id="settings.workspace.general.title" />
         </Heading>
       </Box>
-      {canViewWorkspaceSettings && multiWorkspaceUI && <UpdateWorkspaceNameForm />}
+      {canViewWorkspaceSettings && multiWorkspaceUI && <UpdateWorkspaceSettingsForm />}
       <TagsTable />
       {canViewWorkspaceSettings && multiWorkspaceUI && canDeleteWorkspace && (
         <FlexContainer direction="column">

@@ -26,6 +26,14 @@ micronaut:
   security:
     authentication-provider-strategy: ALL
     enabled: ${API_AUTHORIZATION_ENABLED:false}
+    token:
+      enabled: ${API_AUTHORIZATION_ENABLED:false}
+      jwt:
+        enabled: ${API_AUTHORIZATION_ENABLED:false}
+        signatures:
+          secret:
+            generator:
+              secret: ${AB_JWT_SIGNATURE_SECRET:}
   server:
     port: 8080
     cors:
@@ -44,6 +52,9 @@ micronaut:
     v1/manifest/resolve:
       enable: true
       sensitive: false
+    v1/manifest/full_resolve:
+      enable: true
+      sensitive: false
     v1/stream/read:
       enable: true
       sensitive: false
@@ -52,11 +63,10 @@ micronaut:
       sensitive: false
 
 airbyte:
+  license-key: ${AIRBYTE_LICENSE_KEY:empty}
   connector-builder-server:
-    github:
-      airbyte-pat-token: ${BUILDER_GITHUB_AIRBYTE_PAT_TOKEN:}
-    ai-assist:
-      url-base: ${AI_ASSIST_URL_BASE:}
+    capabilities:
+      enable-unsafe-code: ${AIRBYTE_ENABLE_UNSAFE_CODE:false}
   acceptance:
     test:
       enabled: ${ACCEPTANCE_TEST_ENABLED:false}
@@ -69,12 +79,6 @@ airbyte:
         credentials-path: ${DATA_PLANE_SERVICE_ACCOUNT_CREDENTIALS_PATH:}
         email: ${DATA_PLANE_SERVICE_ACCOUNT_EMAIL:}
   edition: ${AIRBYTE_EDITION:COMMUNITY}
-  internal:
-    api:
-      auth-header:
-        name: ${AIRBYTE_API_AUTH_HEADER_NAME:}
-        value: ${AIRBYTE_API_AUTH_HEADER_VALUE:}
-      host: ${INTERNAL_API_HOST}
   role: ${AIRBYTE_ROLE:}
   tracking:
     strategy: ${TRACKING_STRATEGY:LOGGING}
@@ -84,7 +88,6 @@ airbyte:
     failure:
       restart-delay: ${WORKFLOW_FAILURE_RESTART_DELAY_SECONDS:600}
   workspace:
-    docker-mount: ${WORKSPACE_DOCKER_MOUNT:}
     root: ${WORKSPACE_ROOT}
 
   # minimal configuration to authenticate internal service accounts w/ keycloak

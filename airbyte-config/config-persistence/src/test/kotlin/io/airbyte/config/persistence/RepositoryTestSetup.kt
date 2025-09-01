@@ -4,17 +4,18 @@
 
 package io.airbyte.config.persistence
 
+import io.airbyte.commons.DEFAULT_ORGANIZATION_ID
 import io.airbyte.config.ActorDefinitionVersion
+import io.airbyte.config.DataplaneGroup
 import io.airbyte.config.DestinationConnection
-import io.airbyte.config.Geography
 import io.airbyte.config.SourceConnection
 import io.airbyte.config.StandardDestinationDefinition
 import io.airbyte.config.StandardSourceDefinition
 import io.airbyte.config.StandardSync
 import io.airbyte.config.StandardWorkspace
 import io.airbyte.config.SupportLevel
-import io.airbyte.config.persistence.OrganizationPersistence.DEFAULT_ORGANIZATION_ID
 import io.airbyte.data.helpers.ActorDefinitionVersionUpdater
+import io.airbyte.data.services.impls.data.DataplaneGroupServiceTestJooqImpl
 import io.airbyte.data.services.impls.jooq.ActorDefinitionServiceJooqImpl
 import io.airbyte.data.services.impls.jooq.DestinationServiceJooqImpl
 import io.airbyte.data.services.impls.jooq.SourceServiceJooqImpl
@@ -29,6 +30,7 @@ import io.mockk.every
 import io.mockk.mockk
 import org.jooq.DSLContext
 import org.jooq.SQLDialect
+import org.jooq.exception.IntegrityConstraintViolationException
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.testcontainers.containers.PostgreSQLContainer
@@ -39,6 +41,7 @@ open class RepositoryTestSetup {
   companion object {
     val connectionId1 = UUID.randomUUID()
     val connectionId2 = UUID.randomUUID()
+    val dataplaneGroupId = UUID.randomUUID()
     private lateinit var context: ApplicationContext
     private lateinit var jooqDslContext: DSLContext
 
@@ -77,6 +80,19 @@ open class RepositoryTestSetup {
       // this line is what runs the migrations
       val database = databaseProviders.createNewConfigsDatabase()
 
+      val dataplaneGroupService = DataplaneGroupServiceTestJooqImpl(database)
+      try {
+        dataplaneGroupService.writeDataplaneGroup(
+          DataplaneGroup()
+            .withId(dataplaneGroupId)
+            .withOrganizationId(DEFAULT_ORGANIZATION_ID)
+            .withName("test")
+            .withEnabled(true)
+            .withTombstone(false),
+        )
+      } catch (_: IntegrityConstraintViolationException) {
+      }
+
       val workspaceId = UUID.randomUUID()
       val workspaceService =
         WorkspaceServiceJooqImpl(
@@ -91,7 +107,7 @@ open class RepositoryTestSetup {
       workspaceService.writeStandardWorkspaceNoSecrets(
         StandardWorkspace()
           .withWorkspaceId(workspaceId)
-          .withDefaultGeography(Geography.US)
+          .withDataplaneGroupId(dataplaneGroupId)
           .withName("")
           .withSlug("")
           .withInitialSetupComplete(true)
@@ -109,9 +125,8 @@ open class RepositoryTestSetup {
           mockk(),
           mockk(),
           mockk(),
-          mockk(),
-          mockk(),
           actorDefinitionUpdate,
+          mockk(),
           mockk(),
         )
 
@@ -153,10 +168,8 @@ open class RepositoryTestSetup {
           database,
           mockk(),
           mockk(),
-          mockk(),
-          mockk(),
-          mockk(),
           actorDefinitionUpdate,
+          mockk(),
           mockk(),
         )
 
@@ -188,21 +201,19 @@ open class RepositoryTestSetup {
           .withWorkspaceId(workspaceId),
       )
 
-      val connectionRepo = StandardSyncPersistence(database)
-      connectionRepo.writeStandardSync(
+      val connectionRepo = RepositoryTestSyncHelper(database)
+      connectionRepo.createStandardSync(
         StandardSync()
           .withConnectionId(connectionId1)
-          .withGeography(Geography.US)
           .withSourceId(sourceId)
           .withDestinationId(destinationId)
           .withName("not null")
           .withBreakingChange(true),
       )
 
-      connectionRepo.writeStandardSync(
+      connectionRepo.createStandardSync(
         StandardSync()
           .withConnectionId(connectionId2)
-          .withGeography(Geography.US)
           .withSourceId(sourceId)
           .withDestinationId(destinationId)
           .withName("not null")

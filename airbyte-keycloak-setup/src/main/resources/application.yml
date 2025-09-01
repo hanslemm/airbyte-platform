@@ -5,6 +5,7 @@ micronaut:
     port: 9002
 
 airbyte:
+  license-key: ${AIRBYTE_LICENSE_KEY:empty}
   airbyte-url: ${AIRBYTE_URL:}
   keycloak:
     protocol: ${KEYCLOAK_PROTOCOL:http}
@@ -24,6 +25,7 @@ airbyte:
       oidc:
         domain: ${OIDC_DOMAIN:}
         app-name: ${OIDC_APP_NAME:}
+        display-name: ${OIDC_DISPLAY_NAME:}
         client-id: ${OIDC_CLIENT_ID:}
         client-secret: ${OIDC_CLIENT_SECRET:}
     initial-user:
@@ -43,7 +45,7 @@ datasources:
     url: ${DATABASE_URL}
     driverClassName: org.postgresql.Driver
     username: ${DATABASE_USER}
-    password: ${DATABASE_PASSWORD}
+    password: ${DATABASE_PASSWORD:}
 
 logger:
   levels:
@@ -53,5 +55,6 @@ logger:
     io.fabric8.kubernetes.client: INFO
     io.netty: INFO
     io.temporal: INFO
+    io.airbyte.keycloak: ${LOG_LEVEL:INFO}
 #   Uncomment to help resolve issues with conditional beans
 #      io.micronaut.context.condition: DEBUG

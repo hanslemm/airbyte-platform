@@ -1,30 +1,27 @@
 import { useIntl } from "react-intl";
-import { SchemaOf } from "yup";
-import * as yup from "yup";
+import { z } from "zod";
 
 import { Form, FormControl } from "components/forms";
 import { FormSubmissionButtons } from "components/forms/FormSubmissionButtons";
 
 import { useCurrentWorkspace, useInvalidateWorkspace, useUpdateWorkspace } from "core/api";
 import { trackError } from "core/utils/datadog";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent } from "core/utils/rbac";
 import { useNotificationService } from "hooks/services/Notification";
 
-interface WorkspaceEmailFormValues {
-  email: string;
-}
-
-const ValidationSchema: SchemaOf<WorkspaceEmailFormValues> = yup.object().shape({
-  email: yup.string().email("form.email.error").required(),
+const ValidationSchema = z.object({
+  email: z.string().email("form.email.error"),
 });
+
+type WorkspaceEmailFormValues = z.infer<typeof ValidationSchema>;
 
 export const WorkspaceEmailForm = () => {
   const { formatMessage } = useIntl();
   const { mutateAsync: updateWorkspace } = useUpdateWorkspace();
   const { registerNotification } = useNotificationService();
-  const { workspaceId, organizationId, name, email } = useCurrentWorkspace();
+  const { workspaceId, name, email } = useCurrentWorkspace();
   const invalidateWorkspace = useInvalidateWorkspace(workspaceId);
-  const canUpdateWorkspace = useIntent("UpdateWorkspace", { workspaceId, organizationId });
+  const canUpdateWorkspace = useGeneratedIntent(Intent.UpdateWorkspace);
 
   const onSubmit = async ({ email }: WorkspaceEmailFormValues) => {
     await updateWorkspace({
@@ -58,7 +55,7 @@ export const WorkspaceEmailForm = () => {
       defaultValues={{
         email,
       }}
-      schema={ValidationSchema}
+      zodSchema={ValidationSchema}
       onSubmit={onSubmit}
       onSuccess={onSuccess}
       onError={onError}

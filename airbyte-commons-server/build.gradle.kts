@@ -35,8 +35,14 @@ dependencies {
   implementation(libs.guava)
   implementation(libs.cron.utils)
 
+  // CBServer dependencies - should probably move to deps.toml
+  implementation("org.kohsuke:github-api:1.327")
+  implementation("org.yaml:snakeyaml:2.2")
+  implementation("io.pebbletemplates:pebble:3.2.4")
+
   implementation(project(":oss:airbyte-analytics"))
   implementation(project(":oss:airbyte-api:connector-builder-api"))
+  implementation(project(":oss:airbyte-api:manifest-server-api"))
   implementation(project(":oss:airbyte-api:problems-api"))
   implementation(project(":oss:airbyte-api:server-api"))
   implementation(project(":oss:airbyte-commons"))
@@ -56,6 +62,9 @@ dependencies {
   implementation(project(":oss:airbyte-config:specs"))
   implementation(project(":oss:airbyte-connector-rollout-client"))
   implementation(project(":oss:airbyte-connector-rollout-shared"))
+  implementation(project(":oss:airbyte-db:jooq"))
+  implementation(project(":oss:airbyte-domain:services"))
+  implementation(project(":oss:airbyte-domain:models"))
   implementation(project(":oss:airbyte-data"))
   implementation(project(":oss:airbyte-featureflag"))
   implementation(project(":oss:airbyte-mappers"))
@@ -80,6 +89,7 @@ dependencies {
   testImplementation(libs.platform.testcontainers.postgresql)
   testImplementation(libs.mockwebserver)
   testImplementation(libs.mockito.inline)
+  testImplementation(libs.mockito.kotlin)
   testImplementation(libs.bundles.junit)
   testImplementation(libs.assertj.core)
   testImplementation(libs.junit.pioneer)

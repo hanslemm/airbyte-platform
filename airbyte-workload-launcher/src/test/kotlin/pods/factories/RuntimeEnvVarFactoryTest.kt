@@ -13,6 +13,7 @@ import io.airbyte.featureflag.Connection
 import io.airbyte.featureflag.ConnectorApmEnabled
 import io.airbyte.featureflag.ContainerOrchestratorJavaOpts
 import io.airbyte.featureflag.InjectAwsSecretsToConnectorPods
+import io.airbyte.featureflag.ReplicationDebugLogLevelEnabled
 import io.airbyte.featureflag.TestClient
 import io.airbyte.featureflag.UseAllowCustomCode
 import io.airbyte.featureflag.UseRuntimeSecretPersistence
@@ -20,11 +21,11 @@ import io.airbyte.featureflag.Workspace
 import io.airbyte.persistence.job.models.IntegrationLauncherConfig
 import io.airbyte.persistence.job.models.JobRunConfig
 import io.airbyte.persistence.job.models.ReplicationInput
-import io.airbyte.workers.helper.ConnectorApmSupportHelper
 import io.airbyte.workers.pod.Metadata.AWS_ASSUME_ROLE_EXTERNAL_ID
-import io.airbyte.workers.pod.ResourceConversionUtils
 import io.airbyte.workload.launcher.constants.EnvVarConstants
+import io.airbyte.workload.launcher.helper.ConnectorApmSupportHelper
 import io.airbyte.workload.launcher.model.toEnvVarList
+import io.airbyte.workload.launcher.pods.ResourceConversionUtils
 import io.airbyte.workload.launcher.pods.factories.RuntimeEnvVarFactory.Companion.MYSQL_SOURCE_NAME
 import io.airbyte.workload.launcher.pods.factories.RuntimeEnvVarFactoryTest.Fixtures.CONTAINER_ORCH_JAVA_OPTS
 import io.airbyte.workload.launcher.pods.factories.RuntimeEnvVarFactoryTest.Fixtures.WORKLOAD_ID
@@ -68,6 +69,7 @@ class RuntimeEnvVarFactoryTest {
     ffClient = mockk()
     every { ffClient.boolVariation(InjectAwsSecretsToConnectorPods, any()) } returns false
     every { ffClient.boolVariation(UseAllowCustomCode, any()) } returns false
+    every { ffClient.boolVariation(ReplicationDebugLogLevelEnabled, any()) } returns false
     airbyteEdition = AirbyteEdition.COMMUNITY
 
     factory =
@@ -76,6 +78,8 @@ class RuntimeEnvVarFactoryTest {
           connectorAwsAssumedRoleSecretEnvList,
           stagingMountPath,
           CONTAINER_ORCH_JAVA_OPTS,
+          false,
+          "info",
           connectorApmSupportHelper,
           ffClient,
           airbyteEdition,
@@ -208,6 +212,8 @@ class RuntimeEnvVarFactoryTest {
           connectorAwsAssumedRoleSecretEnvList,
           stagingMountPath,
           CONTAINER_ORCH_JAVA_OPTS,
+          false,
+          "info",
           connectorApmSupportHelper,
           ffClient,
           airbyteEdition,
@@ -311,6 +317,7 @@ class RuntimeEnvVarFactoryTest {
     val metadataEnvVars = listOf(EnvVar("metadata-var", "4", null))
     val resourceEnvVars = listOf(EnvVar("resource-var", "5", null))
     val customCodeEnvVars = listOf(EnvVar("custom-code-var", "6", null))
+    val debugLogLevelEnvVars = listOf(EnvVar("debug-log-var", "7", null))
     val passThroughVars = passThroughEnvMap?.toEnvVarList().orEmpty()
     every { factory.resolveAwsAssumedRoleEnvVars(any()) } returns awsEnvVars
     every { factory.getConnectorApmEnvVars(any(), any()) } returns apmEnvVars
@@ -318,27 +325,30 @@ class RuntimeEnvVarFactoryTest {
     every { factory.getMetadataEnvVars(any()) } returns metadataEnvVars
     every { factory.getResourceEnvVars(any()) } returns resourceEnvVars
     every { factory.getDeclarativeCustomCodeSupportEnvVars(any()) } returns customCodeEnvVars
+    every { factory.getLogLevelEnvVars(any()) } returns debugLogLevelEnvVars
 
     val config =
       IntegrationLauncherConfig()
         .withAdditionalEnvironmentVariables(passThroughEnvMap)
         .withDockerImage("image-name")
         .withWorkspaceId(workspaceId)
+        .withConnectionId(UUID.randomUUID())
 
     val resourceReqs = AirbyteResourceRequirements()
 
     val result = factory.replicationConnectorEnvVars(config, resourceReqs, false)
 
-    val expected = awsEnvVars + apmEnvVars + configurationEnvVars + metadataEnvVars + resourceEnvVars + passThroughVars + customCodeEnvVars
+    val expected =
+      awsEnvVars + apmEnvVars + configurationEnvVars + metadataEnvVars + resourceEnvVars + passThroughVars + customCodeEnvVars + debugLogLevelEnvVars
 
     assertEquals(expected, result)
   }
 
   @ParameterizedTest
   @ValueSource(booleans = [true, false])
-  fun `builds expected env vars for check connector container`(useRuntimeSecretPersistence: Boolean) {
+  fun `builds expected env vars for check connector container`(flagValue: Boolean) {
     every { factory.resolveAwsAssumedRoleEnvVars(any()) } returns connectorAwsAssumedRoleSecretEnvList
-    every { ffClient.boolVariation(UseRuntimeSecretPersistence, any()) } returns useRuntimeSecretPersistence
+    every { ffClient.boolVariation(UseRuntimeSecretPersistence, any()) } returns flagValue
     val config =
       IntegrationLauncherConfig()
         .withWorkspaceId(workspaceId)
@@ -346,8 +356,8 @@ class RuntimeEnvVarFactoryTest {
 
     assertEquals(
       connectorAwsAssumedRoleSecretEnvList +
-        EnvVar(EnvVarConstants.USE_RUNTIME_SECRET_PERSISTENCE, useRuntimeSecretPersistence.toString(), null) +
-        EnvVar(AirbyteEnvVar.AIRBYTE_ALLOW_CUSTOM_CODE.toString(), false.toString(), null) +
+        EnvVar(EnvVarConstants.USE_RUNTIME_SECRET_PERSISTENCE, flagValue.toString(), null) +
+        EnvVar(AirbyteEnvVar.AIRBYTE_ENABLE_UNSAFE_CODE.toString(), false.toString(), null) +
         EnvVar(AirbyteEnvVar.OPERATION_TYPE.toString(), WorkloadType.CHECK.toString(), null) +
         EnvVar(AirbyteEnvVar.WORKLOAD_ID.toString(), WORKLOAD_ID, null),
       result,
@@ -356,9 +366,9 @@ class RuntimeEnvVarFactoryTest {
 
   @ParameterizedTest
   @ValueSource(booleans = [true, false])
-  fun `builds expected env vars for discover connector container`(useRuntimeSecretPersistence: Boolean) {
+  fun `builds expected env vars for discover connector container`(flagValue: Boolean) {
     every { factory.resolveAwsAssumedRoleEnvVars(any()) } returns connectorAwsAssumedRoleSecretEnvList
-    every { ffClient.boolVariation(UseRuntimeSecretPersistence, any()) } returns useRuntimeSecretPersistence
+    every { ffClient.boolVariation(UseRuntimeSecretPersistence, any()) } returns flagValue
     val config =
       IntegrationLauncherConfig()
         .withWorkspaceId(workspaceId)
@@ -366,8 +376,8 @@ class RuntimeEnvVarFactoryTest {
 
     assertEquals(
       connectorAwsAssumedRoleSecretEnvList +
-        EnvVar(EnvVarConstants.USE_RUNTIME_SECRET_PERSISTENCE, useRuntimeSecretPersistence.toString(), null) +
-        EnvVar(AirbyteEnvVar.AIRBYTE_ALLOW_CUSTOM_CODE.toString(), false.toString(), null) +
+        EnvVar(EnvVarConstants.USE_RUNTIME_SECRET_PERSISTENCE, flagValue.toString(), null) +
+        EnvVar(AirbyteEnvVar.AIRBYTE_ENABLE_UNSAFE_CODE.toString(), false.toString(), null) +
         EnvVar(AirbyteEnvVar.OPERATION_TYPE.toString(), WorkloadType.DISCOVER.toString(), null) +
         EnvVar(AirbyteEnvVar.WORKLOAD_ID.toString(), WORKLOAD_ID, null),
       result,
@@ -384,7 +394,7 @@ class RuntimeEnvVarFactoryTest {
 
     assertEquals(
       listOf(
-        EnvVar(AirbyteEnvVar.AIRBYTE_ALLOW_CUSTOM_CODE.toString(), false.toString(), null),
+        EnvVar(AirbyteEnvVar.AIRBYTE_ENABLE_UNSAFE_CODE.toString(), false.toString(), null),
         EnvVar(AirbyteEnvVar.OPERATION_TYPE.toString(), WorkloadType.SPEC.toString(), null),
         EnvVar(AirbyteEnvVar.WORKLOAD_ID.toString(), WORKLOAD_ID, null),
       ),
@@ -393,13 +403,37 @@ class RuntimeEnvVarFactoryTest {
   }
 
   @ParameterizedTest
-  @ValueSource(booleans = [true, false])
-  fun `builds expected env vars for getDeclarativeCustomCodeSupportEnvVars`(useAllowCustomCode: Boolean) {
+  @CsvSource(
+    "true, true, true",
+    "true, false, true",
+    "false, true, true",
+    "false, false, false",
+  )
+  fun `builds expected env vars for getDeclarativeCustomCodeSupportEnvVars`(
+    useAllowCustomCode: Boolean,
+    globalOverride: Boolean,
+    expectedEnvValue: Boolean,
+  ) {
     every { ffClient.boolVariation(UseAllowCustomCode, any()) } returns useAllowCustomCode
-    val result = factory.getDeclarativeCustomCodeSupportEnvVars(Workspace(workspaceId))
+
+    val envFactory =
+      spyk(
+        RuntimeEnvVarFactory(
+          connectorAwsAssumedRoleSecretEnvList,
+          stagingMountPath,
+          CONTAINER_ORCH_JAVA_OPTS,
+          globalOverride,
+          "info",
+          connectorApmSupportHelper,
+          ffClient,
+          airbyteEdition,
+        ),
+      )
+
+    val result = envFactory.getDeclarativeCustomCodeSupportEnvVars(Workspace(workspaceId))
 
     assertEquals(
-      listOf(EnvVar(AirbyteEnvVar.AIRBYTE_ALLOW_CUSTOM_CODE.toString(), useAllowCustomCode.toString(), null)),
+      listOf(EnvVar(AirbyteEnvVar.AIRBYTE_ENABLE_UNSAFE_CODE.toString(), expectedEnvValue.toString(), null)),
       result,
     )
   }
@@ -414,6 +448,7 @@ class RuntimeEnvVarFactoryTest {
   ) {
     every { ffClient.stringVariation(ContainerOrchestratorJavaOpts, any()) } returns optsOverride
     every { ffClient.boolVariation(UseRuntimeSecretPersistence, any()) } returns useRuntimeSecretPersistence
+    val connectionId = UUID.randomUUID()
     val jobRunConfig =
       JobRunConfig()
         .withJobId("2324")
@@ -421,9 +456,10 @@ class RuntimeEnvVarFactoryTest {
     val input =
       ReplicationInput()
         .withJobRunConfig(jobRunConfig)
-        .withConnectionId(UUID.randomUUID())
+        .withConnectionId(connectionId)
         .withUseFileTransfer(useFileTransfer)
-        .withConnectionContext(ConnectionContext().withOrganizationId(UUID.randomUUID()))
+        .withConnectionContext(ConnectionContext().withOrganizationId(UUID.randomUUID()).withWorkspaceId(workspaceId).withConnectionId(connectionId))
+        .withSourceLauncherConfig(IntegrationLauncherConfig().withWorkspaceId(workspaceId))
     val result = factory.orchestratorEnvVars(input, WORKLOAD_ID)
 
     assertEquals(
@@ -437,7 +473,34 @@ class RuntimeEnvVarFactoryTest {
         EnvVar(EnvVarConstants.JAVA_OPTS_ENV_VAR, expectedOpts, null),
         EnvVar(EnvVarConstants.AIRBYTE_STAGING_DIRECTORY, stagingMountPath, null),
         EnvVar(EnvVarConstants.USE_RUNTIME_SECRET_PERSISTENCE, useRuntimeSecretPersistence.toString(), null),
+        EnvVar(EnvVarConstants.LOG_LEVEL, "info", null),
       ),
+      result,
+    )
+  }
+
+  @Test
+  fun `builds debug log level env vars when feature flag is enabled`() {
+    val context = Workspace(workspaceId)
+    every { ffClient.boolVariation(ReplicationDebugLogLevelEnabled, context) } returns true
+
+    val result = factory.getLogLevelEnvVars(context)
+
+    assertEquals(
+      listOf(EnvVar(EnvVarConstants.LOG_LEVEL, "debug", null)),
+      result,
+    )
+  }
+
+  @Test
+  fun `returns list with default log level when debug log level feature flag is disabled`() {
+    val context = Workspace(workspaceId)
+    every { ffClient.boolVariation(ReplicationDebugLogLevelEnabled, context) } returns false
+
+    val result = factory.getLogLevelEnvVars(context)
+
+    assertEquals(
+      listOf(EnvVar(EnvVarConstants.LOG_LEVEL, "info", null)),
       result,
     )
   }

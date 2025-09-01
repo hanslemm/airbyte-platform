@@ -13,6 +13,8 @@ export const enum Namespace {
   STREAM_SELECTION = "StreamSelection",
   FORM = "Form",
   ENTERPRISE_SOURCE_STUB = "EnterpriseSourceStub",
+  CONNECTIONS = "Connections",
+  EMBEDDED = "Embedded",
 }
 
 export const enum Action {
@@ -29,6 +31,8 @@ export const enum Action {
   DELETE = "Delete",
   REQUEST = "Request",
   SKIP = "Skip",
+  NEXT = "Next",
+  COMPLETED = "Completed",
   PREFERENCES = "Preferences",
   NO_MATCHING_CONNECTOR = "NoMatchingConnector",
   SELECTION_OPENED = "SelectionOpened",
@@ -61,10 +65,15 @@ export const enum Action {
   USER_INPUT_CREATE = "UserInputCreate",
   USER_INPUT_EDIT = "UserInputEdit",
   USER_INPUT_DELETE = "UserInputDelete",
+  DYNAMIC_STREAM_SELECT = "DynamicStreamSelect",
   STREAM_SELECT = "StreamSelect",
+  DYNAMIC_STREAM_CREATE = "DynamicStreamCreate",
   STREAM_CREATE = "StreamCreate",
   STREAM_COPY = "StreamCopy",
   STREAM_DELETE = "StreamDelete",
+  DYNAMIC_STREAM_DELETE = "DynamicStreamDelete",
+  DYNAMIC_STREAM_GENERATE = "DynamicStreamGenerate",
+  DYNAMIC_STREAM_PREVIEW_ENDPOINT = "DynamicStreamPreviewEndpoint",
   STREAM_TEST = "StreamTest",
   STREAM_TEST_SUCCESS = "StreamTestSuccess",
   STREAM_TEST_FAILURE = "StreamTestFailure",
@@ -77,6 +86,7 @@ export const enum Action {
   MERGE_SCHEMA = "MergeSchema",
   UI_INCOMPATIBLE_YAML_IMPORTED = "UiIncompatibleYamlImported",
   UI_COMPATIBLE_YAML_IMPORTED = "UiCompatibleYamlImported",
+  YAML_IMPORTED = "YamlImported",
   INVALID_YAML_UPLOADED = "InvalidYamlUploaded",
   START_FROM_SCRATCH = "StartFromScratch",
   CHANGE_PROJECT_VERSION = "ChangeProjectVersion",
@@ -96,6 +106,18 @@ export const enum Action {
   CONNECTOR_BUILDER_ASSIST_DISABLED = "ConnectorBuilderAssistDisabled",
   CONNECTOR_BUILDER_ASSIST_SUGGESTION_VIEWED = "ConnectorBuilderAssistSuggestionViewed",
   CONNECTOR_BUILDER_ASSIST_SUGGESTION_ACCEPTED = "ConnectorBuilderAssistSuggestionAccepted",
+
+  // Connections Actions
+  CONNECTIONS_GRAPH_DRAWER_OPENED = "ConnectionGraphDrawerOpened",
+  CONNECTIONS_GRAPH_DRAWER_LOADED = "ConnectionGraphDrawerLoaded",
+  SYNC_FAILURE_EXPLANATION_OPENED = "SyncFailureExplanationOpened",
+  REFRESH_FAILURE_EXPLANATION_OPENED = "RefreshFailureExplanationOpened",
+
+  // Embedded Onboarding Actions
+  DESTINATION_SELECTED = "DestinationSelected",
+  CONNECTION_TEMPLATE_CREATED = "ConnectionTemplateCreated",
+  CONNECTION_TEMPLATE_CREATE_FAILED = "ConnectionTemplateCreateFailed",
+  BACK_TO_SELECT_DESTINATION = "BackToSelectDestination",
 }
 
 export type EventParams = Record<string, unknown>;

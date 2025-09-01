@@ -100,4 +100,11 @@ abstract class AbstractConfigRepositoryTest {
   val tagRepository = context.getBean(TagRepository::class.java)!!
   val dataplaneGroupRepository = context.getBean(DataplaneGroupRepository::class.java)!!
   val dataplaneRepository = context.getBean(DataplaneRepository::class.java)!!
+  val secretConfigRepository = context.getBean(SecretConfigRepository::class.java)!!
+  val secretStorageRepository = context.getBean(SecretStorageRepository::class.java)!!
+  val secretReferenceRepository = context.getBean(SecretReferenceRepository::class.java)!!
+  val secretReferenceWithConfigRepository = context.getBean(SecretReferenceWithConfigRepository::class.java)!!
+  val actorRepository = context.getBean(ActorRepository::class.java)!!
+  val actorDefinitionRepository = context.getBean(ActorDefinitionRepository::class.java)!!
+  val ssoConfigRepository = context.getBean(SsoConfigRepository::class.java)!!
 }

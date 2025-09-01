@@ -7,10 +7,13 @@ package io.airbyte.api.client
 import dev.failsafe.RetryPolicy
 import io.airbyte.api.client.generated.ActorDefinitionVersionApi
 import io.airbyte.api.client.generated.AttemptApi
+import io.airbyte.api.client.generated.BillingApi
+import io.airbyte.api.client.generated.CommandApi
 import io.airbyte.api.client.generated.ConnectionApi
 import io.airbyte.api.client.generated.ConnectorBuilderProjectApi
 import io.airbyte.api.client.generated.ConnectorRolloutApi
 import io.airbyte.api.client.generated.DataplaneApi
+import io.airbyte.api.client.generated.DataplaneGroupApi
 import io.airbyte.api.client.generated.DeploymentMetadataApi
 import io.airbyte.api.client.generated.DestinationApi
 import io.airbyte.api.client.generated.DestinationDefinitionApi
@@ -22,6 +25,7 @@ import io.airbyte.api.client.generated.OperationApi
 import io.airbyte.api.client.generated.OrganizationApi
 import io.airbyte.api.client.generated.OrganizationPaymentConfigApi
 import io.airbyte.api.client.generated.PermissionApi
+import io.airbyte.api.client.generated.SecretStorageApi
 import io.airbyte.api.client.generated.SecretsPersistenceConfigApi
 import io.airbyte.api.client.generated.SignalApi
 import io.airbyte.api.client.generated.SourceApi
@@ -31,11 +35,8 @@ import io.airbyte.api.client.generated.StateApi
 import io.airbyte.api.client.generated.StreamStatusesApi
 import io.airbyte.api.client.generated.UserApi
 import io.airbyte.api.client.generated.WebBackendApi
+import io.airbyte.api.client.generated.WorkloadOutputApi
 import io.airbyte.api.client.generated.WorkspaceApi
-import io.micronaut.context.annotation.Requires
-import io.micronaut.context.annotation.Value
-import jakarta.inject.Named
-import jakarta.inject.Singleton
 import okhttp3.OkHttpClient
 import okhttp3.Response
 
@@ -61,20 +62,20 @@ import okhttp3.Response
  *
  * This needs to be open so that we can wrap it in micronaut test annotations for mock injection in tests.
  */
-@Suppress("MemberVisibilityCanBePrivate")
-@Singleton
-@Requires(property = "airbyte.internal-api.base-path")
 open class AirbyteApiClient(
-  @Value("\${airbyte.internal-api.base-path}") basePath: String,
-  @Named("airbyteApiClientRetryPolicy") policy: RetryPolicy<Response>,
-  @Named("airbyteApiOkHttpClient") httpClient: OkHttpClient,
+  basePath: String,
+  policy: RetryPolicy<Response>,
+  httpClient: OkHttpClient,
 ) {
   val actorDefinitionVersionApi = ActorDefinitionVersionApi(basePath = basePath, client = httpClient, policy = policy)
   val attemptApi = AttemptApi(basePath = basePath, client = httpClient, policy = policy)
+  val billingApi = BillingApi(basePath = basePath, client = httpClient, policy = policy)
+  val commandApi = CommandApi(basePath = basePath, client = httpClient, policy = policy)
   val connectionApi = ConnectionApi(basePath = basePath, client = httpClient, policy = policy)
   val connectorBuilderProjectApi = ConnectorBuilderProjectApi(basePath = basePath, client = httpClient, policy = policy)
   val connectorRolloutApi = ConnectorRolloutApi(basePath = basePath, client = httpClient, policy = policy)
   val dataplaneApi = DataplaneApi(basePath = basePath, client = httpClient, policy = policy)
+  val dataplaneGroupApi = DataplaneGroupApi(basePath = basePath, client = httpClient, policy = policy)
   val deploymentMetadataApi = DeploymentMetadataApi(basePath = basePath, client = httpClient, policy = policy)
   val destinationApi = DestinationApi(basePath = basePath, client = httpClient, policy = policy)
   val destinationDefinitionApi = DestinationDefinitionApi(basePath = basePath, client = httpClient, policy = policy)
@@ -89,6 +90,7 @@ open class AirbyteApiClient(
   val permissionApi = PermissionApi(basePath = basePath, client = httpClient, policy = policy)
   val secretPersistenceConfigApi = SecretsPersistenceConfigApi(basePath = basePath, client = httpClient, policy = policy)
   val signalApi = SignalApi(basePath = basePath, client = httpClient, policy = policy)
+  val secretStorageApi = SecretStorageApi(basePath = basePath, client = httpClient, policy = policy)
   val sourceApi = SourceApi(basePath = basePath, client = httpClient, policy = policy)
   val sourceDefinitionApi = SourceDefinitionApi(basePath = basePath, client = httpClient, policy = policy)
   val sourceDefinitionSpecificationApi =
@@ -97,5 +99,6 @@ open class AirbyteApiClient(
   val streamStatusesApi = StreamStatusesApi(basePath = basePath, client = httpClient, policy = policy)
   val userApi = UserApi(basePath = basePath, client = httpClient, policy = policy)
   val webBackendApi = WebBackendApi(basePath = basePath, client = httpClient, policy = policy)
+  val workloadOutputApi = WorkloadOutputApi(basePath = basePath, client = httpClient, policy = policy)
   val workspaceApi = WorkspaceApi(basePath = basePath, client = httpClient, policy = policy)
 }

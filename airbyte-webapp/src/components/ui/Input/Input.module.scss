@@ -31,7 +31,15 @@
     border-color: colors.$grey-100;
   }
 
-  &:not(.disabled, .readOnly, .focused):hover {
+  &:focus-within {
+    border-color: colors.$blue;
+
+    &.light {
+      background-color: colors.$foreground;
+    }
+  }
+
+  &:not(.disabled, .readOnly, :focus-within):hover {
     border-color: colors.$grey-300;
 
     &.light {
@@ -42,21 +50,31 @@
       border-color: colors.$red;
     }
   }
+}
 
-  &.focused {
-    border-color: colors.$blue;
+$input-horizontal-padding: variables.$spacing-md;
+$icon-width: 20px;
 
-    &.light {
-      background-color: colors.$foreground;
-    }
-  }
+/** The icon is positioned absolute so that it is within the bounds of the input. Other components like our ComboBox
+ * rely on the input width to position popovers, so it's important that the icon is within the input. **/
+.icon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: ($input-horizontal-padding * 2) + $icon-width;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding-inline: $input-horizontal-padding;
 }
 
 .input {
   outline: none;
   width: 100%;
-  padding: 7px 8px;
-  font-size: variables.$font-size-lg;
+  padding: 7px $input-horizontal-padding;
+  font-size: variables.$font-size-md;
   font-weight: normal;
   border: none;
   background: none;
@@ -75,6 +93,10 @@
   &.readOnly {
     pointer-events: none;
     color: colors.$grey-300;
+  }
+
+  &--hasIcon {
+    padding-left: calc(2 * $input-horizontal-padding + $icon-width);
   }
 }
 

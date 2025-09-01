@@ -8,8 +8,10 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import io.airbyte.config.secrets.hydration.SecretsHydrator
 import io.airbyte.config.secrets.persistence.RuntimeSecretPersistence
+import io.airbyte.config.secrets.persistence.SecretPersistence
 import io.micronaut.context.annotation.Requires
 import jakarta.inject.Singleton
+import java.util.UUID
 
 private const val SECRET_KEY = "_secret"
 
@@ -28,25 +30,28 @@ open class SecretsRepositoryReader(
    * @param secretCoordinate secret coordinate
    * @return JsonNode representing the fetched secret
    */
-  fun fetchSecretFromDefaultSecretPersistence(secretCoordinate: SecretCoordinate): JsonNode {
+  fun fetchJsonSecretFromDefaultSecretPersistence(secretCoordinate: SecretCoordinate): JsonNode {
     val node = JsonNodeFactory.instance.objectNode()
     node.put(SECRET_KEY, secretCoordinate.fullCoordinate)
     return secretsHydrator.hydrateSecretCoordinateFromDefaultSecretPersistence(node)
   }
 
-  /**
-   * Given a secret coordinate, fetch the secret.
-   *
-   * @param secretCoordinate secret coordinate
-   * @return JsonNode representing the fetched secret
-   */
-  fun fetchSecretFromRuntimeSecretPersistence(
+  fun fetchJsonSecretFromSecretPersistence(
     secretCoordinate: SecretCoordinate,
-    runtimeSecretPersistence: RuntimeSecretPersistence,
+    secretPersistence: SecretPersistence,
   ): JsonNode {
     val node = JsonNodeFactory.instance.objectNode()
     node.put(SECRET_KEY, secretCoordinate.fullCoordinate)
-    return secretsHydrator.hydrateSecretCoordinateFromRuntimeSecretPersistence(node, runtimeSecretPersistence)
+    return secretsHydrator.hydrateSecretCoordinateAsJson(node, secretPersistence)
+  }
+
+  fun fetchSecretFromSecretPersistence(
+    secretCoordinate: SecretCoordinate,
+    secretPersistence: SecretPersistence,
+  ): String {
+    val node = JsonNodeFactory.instance.objectNode()
+    node.put(SECRET_KEY, secretCoordinate.fullCoordinate)
+    return secretsHydrator.hydrateSecretCoordinate(node, secretPersistence)
   }
 
   /**
@@ -55,6 +60,10 @@ open class SecretsRepositoryReader(
    * @param configWithSecrets Config with _secrets in it.
    * @return Config with _secrets hydrated.
    */
+  @Deprecated(
+    "Use hydrateConfig instead",
+    ReplaceWith("hydrateConfig(configWithSecrets, secretPersistence)", "io.airbyte.config.secrets.SecretsRepositoryReader"),
+  )
   fun hydrateConfigFromDefaultSecretPersistence(configWithSecrets: JsonNode?): JsonNode? =
     if (configWithSecrets != null) {
       secretsHydrator.hydrateFromDefaultSecretPersistence(configWithSecrets)
@@ -62,6 +71,10 @@ open class SecretsRepositoryReader(
       null
     }
 
+  @Deprecated(
+    "Use hydrateConfig instead",
+    ReplaceWith("hydrateConfig(configWithSecrets, runtimeSecretPersistence)", "io.airbyte.config.secrets.SecretsRepositoryReader"),
+  )
   fun hydrateConfigFromRuntimeSecretPersistence(
     configuration: JsonNode?,
     runtimeSecretPersistence: RuntimeSecretPersistence,
@@ -71,4 +84,19 @@ open class SecretsRepositoryReader(
     } else {
       null
     }
+
+  fun hydrateConfig(
+    configuration: ConfigWithSecretReferences?,
+    secretPersistence: SecretPersistence,
+  ): JsonNode? =
+    if (configuration != null) {
+      secretsHydrator.hydrate(configuration, secretPersistence)
+    } else {
+      null
+    }
+
+  fun hydrateConfig(
+    configuration: ConfigWithSecretReferences,
+    secretPersistenceMap: Map<UUID?, SecretPersistence>,
+  ): JsonNode = secretsHydrator.hydrate(configuration, secretPersistenceMap)
 }

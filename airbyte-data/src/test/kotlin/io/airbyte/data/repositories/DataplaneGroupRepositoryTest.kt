@@ -4,6 +4,9 @@
 
 package io.airbyte.data.repositories
 
+import io.airbyte.commons.AUTO_DATAPLANE_GROUP
+import io.airbyte.commons.EU_DATAPLANE_GROUP
+import io.airbyte.commons.US_DATAPLANE_GROUP
 import io.airbyte.data.repositories.entities.DataplaneGroup
 import io.airbyte.db.instance.configs.jooq.generated.Keys
 import io.airbyte.db.instance.configs.jooq.generated.Tables
@@ -22,13 +25,12 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
     @BeforeAll
     @JvmStatic
     fun setup() {
-      // so we don't have to deal with making an organization and user
+      // so we don't have to deal with making an organization
       jooqDslContext
         .alterTable(
           Tables.DATAPLANE_GROUP,
         ).dropForeignKey(Keys.DATAPLANE_GROUP__DATAPLANE_GROUP_ORGANIZATION_ID_FKEY.constraint())
         .execute()
-      jooqDslContext.alterTable(Tables.DATAPLANE_GROUP).dropForeignKey(Keys.DATAPLANE_GROUP__DATAPLANE_GROUP_UPDATED_BY_FKEY.constraint()).execute()
     }
   }
 
@@ -37,9 +39,8 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
     val dataplaneGroup =
       DataplaneGroup(
         organizationId = UUID.randomUUID(),
-        name = "Test",
+        name = AUTO_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = false,
       )
     val savedDataplaneGroup = dataplaneGroupRepository.save(dataplaneGroup)
@@ -54,14 +55,13 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
 
   @Test
   fun `update dataplane group`() {
-    val updatedName = "Updated dataplane group name"
+    val updatedName = US_DATAPLANE_GROUP
     val updatedEnabled = true
     val dataplaneGroup =
       DataplaneGroup(
         organizationId = UUID.randomUUID(),
-        name = "Test",
+        name = AUTO_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = false,
       )
     val savedDataplaneGroup = dataplaneGroupRepository.save(dataplaneGroup)
@@ -82,9 +82,8 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
     val dataplaneGroup =
       DataplaneGroup(
         organizationId = UUID.randomUUID(),
-        name = "Test",
+        name = AUTO_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = false,
       )
     val savedDataplaneGroup = dataplaneGroupRepository.save(dataplaneGroup)
@@ -95,33 +94,107 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
   }
 
   @Test
+  fun `find dataplane groups by organization id and name`() {
+    val organizationId = UUID.randomUUID()
+    val otherOrganizationId = UUID.randomUUID()
+    val matchingName = AUTO_DATAPLANE_GROUP
+    val nonMatchingName = EU_DATAPLANE_GROUP
+
+    val dataplaneGroup1 =
+      DataplaneGroup(
+        organizationId = organizationId,
+        name = matchingName,
+        enabled = true,
+        tombstone = false,
+        updatedAt = OffsetDateTime.now(),
+      )
+
+    val dataplaneGroup2 =
+      DataplaneGroup(
+        organizationId = organizationId,
+        name = nonMatchingName,
+        enabled = true,
+        tombstone = false,
+        updatedAt = OffsetDateTime.now().plusSeconds(1),
+      )
+
+    val dataplaneGroup3 =
+      DataplaneGroup(
+        organizationId = otherOrganizationId,
+        name = matchingName,
+        enabled = true,
+        tombstone = false,
+        updatedAt = OffsetDateTime.now(),
+      )
+
+    dataplaneGroupRepository.save(dataplaneGroup1)
+    dataplaneGroupRepository.save(dataplaneGroup2)
+    dataplaneGroupRepository.save(dataplaneGroup3)
+
+    val retrievedDataplaneGroups = dataplaneGroupRepository.findAllByOrganizationIdAndNameIgnoreCase(organizationId, matchingName)
+
+    assertEquals(1, retrievedDataplaneGroups.size)
+    assertThat(retrievedDataplaneGroups)
+      .extracting("name")
+      .containsExactly(matchingName)
+  }
+
+  @Test
+  fun `find dataplane groups by organization id and name ignores case`() {
+    val organizationId = UUID.randomUUID()
+    val matchingName1 = AUTO_DATAPLANE_GROUP.uppercase()
+
+    val dataplaneGroup =
+      DataplaneGroup(
+        organizationId = organizationId,
+        name = AUTO_DATAPLANE_GROUP,
+        enabled = true,
+        tombstone = false,
+        updatedAt = OffsetDateTime.now(),
+      )
+
+    dataplaneGroupRepository.save(dataplaneGroup)
+
+    val retrievedDataplaneGroups1 = dataplaneGroupRepository.findAllByOrganizationIdAndNameIgnoreCase(organizationId, matchingName1)
+
+    assertEquals(1, retrievedDataplaneGroups1.size)
+    assertThat(retrievedDataplaneGroups1)
+      .extracting("name")
+      .containsExactly(AUTO_DATAPLANE_GROUP)
+
+    val retrievedDataplaneGroups2 = dataplaneGroupRepository.findAllByOrganizationIdAndNameIgnoreCase(organizationId, matchingName1)
+
+    assertEquals(1, retrievedDataplaneGroups2.size)
+    assertThat(retrievedDataplaneGroups2)
+      .extracting("name")
+      .containsExactly(AUTO_DATAPLANE_GROUP)
+  }
+
+  @Test
   fun `list dataplane groups by organization id including tombstoned`() {
     val organizationId = UUID.randomUUID()
     val otherOrganizationId = UUID.randomUUID()
     val dataplaneGroup1 =
       DataplaneGroup(
         organizationId = organizationId,
-        name = "Test 1",
+        name = AUTO_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = false,
         updatedAt = OffsetDateTime.now(),
       )
     val dataplaneGroup2 =
       DataplaneGroup(
         organizationId = organizationId,
-        name = "Test 2",
+        name = US_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = true,
         updatedAt = OffsetDateTime.now().plusSeconds(1),
       )
     val dataplaneGroup3 =
       DataplaneGroup(
         organizationId = otherOrganizationId,
-        name = "Test 3",
+        name = EU_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = false,
         updatedAt = OffsetDateTime.now(),
       )
@@ -129,12 +202,12 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
     dataplaneGroupRepository.save(dataplaneGroup2)
     dataplaneGroupRepository.save(dataplaneGroup3)
 
-    val retrievedDataplaneGroups = dataplaneGroupRepository.findAllByOrganizationIdOrderByUpdatedAtDesc(organizationId)
+    val retrievedDataplaneGroups = dataplaneGroupRepository.findAllByOrganizationIdInOrderByUpdatedAtDesc(listOf(organizationId))
 
     assertEquals(2, retrievedDataplaneGroups.size)
     assertThat(retrievedDataplaneGroups)
       .extracting("name")
-      .containsExactly("Test 2", "Test 1")
+      .containsExactly(US_DATAPLANE_GROUP, AUTO_DATAPLANE_GROUP)
   }
 
   @Test
@@ -144,27 +217,24 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
     val dataplaneGroup1 =
       DataplaneGroup(
         organizationId = organizationId,
-        name = "Test 1",
+        name = AUTO_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = false,
         updatedAt = OffsetDateTime.now(),
       )
     val dataplaneGroup2 =
       DataplaneGroup(
         organizationId = organizationId,
-        name = "Test 2",
+        name = EU_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = true,
         updatedAt = OffsetDateTime.now().plusSeconds(1),
       )
     val dataplaneGroup3 =
       DataplaneGroup(
         organizationId = otherOrganizationId,
-        name = "Test 3",
+        name = US_DATAPLANE_GROUP,
         enabled = false,
-        updatedBy = UUID.randomUUID(),
         tombstone = false,
         updatedAt = OffsetDateTime.now(),
       )
@@ -172,11 +242,11 @@ class DataplaneGroupRepositoryTest : AbstractConfigRepositoryTest() {
     dataplaneGroupRepository.save(dataplaneGroup2)
     dataplaneGroupRepository.save(dataplaneGroup3)
 
-    val retrievedDataplaneGroups = dataplaneGroupRepository.findAllByOrganizationIdAndTombstoneFalseOrderByUpdatedAtDesc(organizationId)
+    val retrievedDataplaneGroups = dataplaneGroupRepository.findAllByOrganizationIdInAndTombstoneFalseOrderByUpdatedAtDesc(listOf(organizationId))
 
     assertEquals(1, retrievedDataplaneGroups.size)
     assertThat(retrievedDataplaneGroups)
       .extracting("name")
-      .containsExactly("Test 1")
+      .containsExactly(AUTO_DATAPLANE_GROUP)
   }
 }

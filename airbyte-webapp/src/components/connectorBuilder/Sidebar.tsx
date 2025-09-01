@@ -6,6 +6,7 @@ import { AdminWorkspaceWarning } from "components/ui/AdminWorkspaceWarning";
 import { FlexContainer } from "components/ui/Flex";
 
 import { Action, Namespace, useAnalyticsService } from "core/services/analytics";
+import { useConnectorBuilderResolve } from "core/services/connectorBuilder/ConnectorBuilderResolveContext";
 import { FeatureItem, IfFeatureEnabled } from "core/services/features";
 import { useConnectorBuilderFormState } from "services/connectorBuilder/ConnectorBuilderStateService";
 
@@ -23,9 +24,13 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<React.PropsWithChildren<SidebarProps>> = ({ className, yamlSelected, children }) => {
   const analyticsService = useAnalyticsService();
-  const { toggleUI, isResolving, currentProject } = useConnectorBuilderFormState();
-  const formValues = useBuilderWatch("formValues");
-  const showSavingIndicator = yamlSelected || formValues.streams.length > 0;
+  const { toggleUI, currentProject } = useConnectorBuilderFormState();
+  const { isResolving } = useConnectorBuilderResolve();
+  const manifest = useBuilderWatch("manifest");
+  const hasStreams =
+    (manifest.streams && manifest.streams.length > 0) ||
+    (manifest.dynamic_streams && manifest.dynamic_streams.length > 0);
+  const showSavingIndicator = yamlSelected || hasStreams;
 
   const OnUiToggleClick = () => {
     toggleUI(yamlSelected ? "ui" : "yaml");

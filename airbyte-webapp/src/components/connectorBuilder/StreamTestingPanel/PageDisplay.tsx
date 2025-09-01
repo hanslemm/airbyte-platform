@@ -10,9 +10,9 @@ import { InfoTooltip, Tooltip } from "components/ui/Tooltip";
 
 import { Page } from "core/api";
 import {
-  StreamReadInferredSchema,
-  StreamReadSlicesItemPagesItemRecordsItem,
-} from "core/api/types/ConnectorBuilderClient";
+  ConnectorBuilderProjectStreamReadInferredSchema,
+  ConnectorBuilderProjectStreamReadSlicesItemPagesItemRecordsItem,
+} from "core/api/types/AirbyteClient";
 import { useLocalStorage } from "core/utils/useLocalStorage";
 import {
   useConnectorBuilderFormManagementState,
@@ -30,7 +30,7 @@ import { formatForDisplay, formatJson } from "../utils";
 
 interface PageDisplayProps {
   page: Page;
-  inferredSchema?: StreamReadInferredSchema;
+  inferredSchema?: ConnectorBuilderProjectStreamReadInferredSchema;
   className?: string;
 }
 
@@ -38,7 +38,7 @@ export const PageDisplay: React.FC<PageDisplayProps> = ({ page, className, infer
   const { formatMessage } = useIntl();
 
   const mode = useBuilderWatch("mode");
-  const testStreamIndex = useBuilderWatch("testStreamIndex");
+  const testStreamId = useBuilderWatch("testStreamId");
   const {
     streamRead,
     schemaWarnings: { incompatibleSchemaErrors, schemaDifferences },
@@ -47,7 +47,7 @@ export const PageDisplay: React.FC<PageDisplayProps> = ({ page, className, infer
   } = useConnectorBuilderTestRead();
   const { setTestReadSettingsOpen } = useConnectorBuilderFormManagementState();
 
-  const autoImportSchema = useAutoImportSchema(testStreamIndex);
+  const autoImportSchema = useAutoImportSchema(testStreamId);
 
   const formattedRequest = useMemo(() => formatForDisplay(page.request), [page.request]);
   const formattedResponse = useMemo(() => formatForDisplay(page.response), [page.response]);
@@ -95,16 +95,17 @@ export const PageDisplay: React.FC<PageDisplayProps> = ({ page, className, infer
             title: (
               <FlexContainer direction="row" justifyContent="center" alignItems="center" gap="sm">
                 <FormattedMessage id="connectorBuilder.schemaTab" />
-                {mode === "ui" && schemaDifferences && !autoImportSchema && (
-                  <SchemaConflictIndicator errors={incompatibleSchemaErrors} />
-                )}
+                {mode === "ui" &&
+                  testStreamId.type !== "generated_stream" &&
+                  schemaDifferences &&
+                  !autoImportSchema && <SchemaConflictIndicator errors={incompatibleSchemaErrors} />}
               </FlexContainer>
             ),
             content: (
               <SchemaDiffView
                 inferredSchema={inferredSchema}
                 incompatibleErrors={incompatibleSchemaErrors}
-                key={testStreamIndex}
+                key={testStreamId.index}
               />
             ),
             "data-testid": "tag-tab-detected-schema",
@@ -143,7 +144,7 @@ export const PageDisplay: React.FC<PageDisplayProps> = ({ page, className, infer
   return <TabbedDisplay className={className} tabs={tabs} defaultTabIndex={defaultTabIndex} />;
 };
 
-const RecordDisplay = ({ records }: { records: StreamReadSlicesItemPagesItemRecordsItem[] }) => {
+const RecordDisplay = ({ records }: { records: ConnectorBuilderProjectStreamReadSlicesItemPagesItemRecordsItem[] }) => {
   const [recordViewMode, setRecordViewMode] = useLocalStorage("connectorBuilderRecordView", "json");
   const formattedRecords = useMemo(() => formatJson(records), [records]);
 

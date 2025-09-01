@@ -9,7 +9,11 @@
 Renders the global.metrics.enabled value
 */}}
 {{- define "airbyte.metrics.enabled" }}
-    {{- .Values.global.metrics.enabled | default false }}
+	{{- if eq .Values.global.metrics.enabled nil }}
+    	{{- false }}
+	{{- else }}
+    	{{- .Values.global.metrics.enabled }}
+	{{- end }}
 {{- end }}
 
 {{/*
@@ -63,7 +67,11 @@ Renders the metrics.statsd.flavor environment variable
 Renders the global.metrics.otlp.enabled value
 */}}
 {{- define "airbyte.metrics.otlp.enabled" }}
-    {{- .Values.global.metrics.otlp.enabled | default false }}
+	{{- if eq .Values.global.metrics.otlp.enabled nil }}
+    	{{- false }}
+	{{- else }}
+    	{{- .Values.global.metrics.otlp.enabled }}
+	{{- end }}
 {{- end }}
 
 {{/*
@@ -75,6 +83,28 @@ Renders the metrics.otlp.enabled environment variable
     configMapKeyRef:
       name: {{ .Release.Name }}-airbyte-env
       key: MICROMETER_METRICS_OTLP_ENABLED
+{{- end }}
+
+{{/*
+Renders the global.metrics.statsd.enabled value
+*/}}
+{{- define "airbyte.metrics.statsd.enabled" }}
+	{{- if eq .Values.global.metrics.statsd.enabled nil }}
+    	{{- false }}
+	{{- else }}
+    	{{- .Values.global.metrics.statsd.enabled }}
+	{{- end }}
+{{- end }}
+
+{{/*
+Renders the metrics.statsd.enabled environment variable
+*/}}
+{{- define "airbyte.metrics.statsd.enabled.env" }}
+- name: MICROMETER_METRICS_STATSD_ENABLED
+  valueFrom:
+    configMapKeyRef:
+      name: {{ .Release.Name }}-airbyte-env
+      key: MICROMETER_METRICS_STATSD_ENABLED
 {{- end }}
 
 {{/*
@@ -96,21 +126,25 @@ Renders the metrics.otlp.collectorEndpoint environment variable
 {{- end }}
 
 {{/*
-Renders the global.metrics.statsd.enabled value
+Renders the global.metrics.publish value
 */}}
-{{- define "airbyte.metrics.statsd.enabled" }}
-    {{- .Values.global.metrics.statsd.enabled | default false }}
+{{- define "airbyte.metrics.publish" }}
+	{{- if eq .Values.global.metrics.publish nil }}
+    	{{- true }}
+	{{- else }}
+    	{{- .Values.global.metrics.publish }}
+	{{- end }}
 {{- end }}
 
 {{/*
-Renders the metrics.statsd.enabled environment variable
+Renders the metrics.publish environment variable
 */}}
-{{- define "airbyte.metrics.statsd.enabled.env" }}
-- name: MICROMETER_METRICS_STATSD_ENABLED
+{{- define "airbyte.metrics.publish.env" }}
+- name: PUBLISH_METRICS
   valueFrom:
     configMapKeyRef:
       name: {{ .Release.Name }}-airbyte-env
-      key: MICROMETER_METRICS_STATSD_ENABLED
+      key: PUBLISH_METRICS
 {{- end }}
 
 {{/*
@@ -157,8 +191,9 @@ Renders the set of all metrics environment variables
 {{- include "airbyte.metrics.step.env" . }}
 {{- include "airbyte.metrics.statsd.flavor.env" . }}
 {{- include "airbyte.metrics.otlp.enabled.env" . }}
-{{- include "airbyte.metrics.otlp.collectorEndpoint.env" . }}
 {{- include "airbyte.metrics.statsd.enabled.env" . }}
+{{- include "airbyte.metrics.otlp.collectorEndpoint.env" . }}
+{{- include "airbyte.metrics.publish.env" . }}
 {{- include "airbyte.metrics.statsd.host.env" . }}
 {{- include "airbyte.metrics.statsd.port.env" . }}
 {{- end }}
@@ -171,8 +206,9 @@ MICROMETER_METRICS_ENABLED: {{ include "airbyte.metrics.enabled" . | quote }}
 MICROMETER_METRICS_STEP: {{ include "airbyte.metrics.step" . | quote }}
 MICROMETER_METRICS_STATSD_FLAVOR: {{ include "airbyte.metrics.statsd.flavor" . | quote }}
 MICROMETER_METRICS_OTLP_ENABLED: {{ include "airbyte.metrics.otlp.enabled" . | quote }}
-OTEL_COLLECTOR_ENDPOINT: {{ include "airbyte.metrics.otlp.collectorEndpoint" . | quote }}
 MICROMETER_METRICS_STATSD_ENABLED: {{ include "airbyte.metrics.statsd.enabled" . | quote }}
+OTEL_COLLECTOR_ENDPOINT: {{ include "airbyte.metrics.otlp.collectorEndpoint" . | quote }}
+PUBLISH_METRICS: {{ include "airbyte.metrics.publish" . | quote }}
 STATSD_HOST: {{ include "airbyte.metrics.statsd.host" . | quote }}
 STATSD_PORT: {{ include "airbyte.metrics.statsd.port" . | quote }}
 {{- end }}

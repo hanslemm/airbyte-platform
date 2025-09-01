@@ -4,13 +4,12 @@ import isEqual from "lodash/isEqual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFormContext } from "react-hook-form";
 
-import { builderInputsToSpec } from "components/connectorBuilder/types";
-
 import { useBuilderProjectUpdateTestingValues } from "core/api";
 import { ConnectorBuilderProjectTestingValues } from "core/api/types/AirbyteClient";
 import { Spec } from "core/api/types/ConnectorManifest";
 import { jsonSchemaToFormBlock } from "core/form/schemaToFormBlock";
 import { FormGroupItem } from "core/form/types";
+import { removeEmptyProperties } from "core/utils/form";
 import { useConnectorBuilderFormState } from "services/connectorBuilder/ConnectorBuilderStateService";
 import { setDefaultValues } from "views/Connector/ConnectorForm/useBuildForm";
 
@@ -39,22 +38,18 @@ import { useBuilderWatch } from "./useBuilderWatch";
  * @returns the testingValuesDirty flag
  */
 export const useUpdateTestingValuesOnChange = () => {
-  const { projectId, jsonManifest } = useConnectorBuilderFormState();
-  const formValues = useBuilderWatch("formValues");
+  const { projectId } = useConnectorBuilderFormState();
   const mode = useBuilderWatch("mode");
   const { setValue, getValues } = useFormContext();
-  const testingValues = useBuilderWatch("testingValues");
-  const spec = useMemo(
-    () => (mode === "ui" ? builderInputsToSpec(formValues.inputs) : jsonManifest.spec),
-    [formValues.inputs, jsonManifest.spec, mode]
-  );
+  const testingValues = removeEmptyProperties(useBuilderWatch("testingValues"));
+  const spec = useBuilderWatch("manifest.spec");
   const specRef = useRef<Spec | undefined>(spec);
   const testingValuesRef = useRef<ConnectorBuilderProjectTestingValues | undefined>(testingValues);
 
   const [testingValuesDirty, setTestingValuesDirty] = useState(false);
   const { mutateAsync: updateTestingValues, isLoading: testingValuesUpdating } = useBuilderProjectUpdateTestingValues(
     projectId,
-    () => setTestingValuesDirty(!isEqual(testingValuesRef.current, getValues("testingValues")))
+    () => setTestingValuesDirty(!isEqual(testingValuesRef.current, removeEmptyProperties(getValues("testingValues"))))
   );
 
   // apply default values on spec change in YAML mode (in UI mode this is handled by InputsForm)

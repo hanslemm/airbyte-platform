@@ -5,12 +5,15 @@
 package io.airbyte.workload.launcher.client
 
 import com.amazonaws.internal.ExceptionUtils
-import io.airbyte.workload.api.client.model.generated.ClaimResponse
-import io.airbyte.workload.api.client.model.generated.WorkloadClaimRequest
-import io.airbyte.workload.api.client.model.generated.WorkloadFailureRequest
-import io.airbyte.workload.api.client.model.generated.WorkloadLaunchedRequest
-import io.airbyte.workload.launcher.pipeline.stages.StageName
-import io.airbyte.workload.launcher.pipeline.stages.model.StageError
+import io.airbyte.config.WorkloadPriority
+import io.airbyte.workload.api.client.WorkloadApiClient
+import io.airbyte.workload.api.domain.ClaimResponse
+import io.airbyte.workload.api.domain.Workload
+import io.airbyte.workload.api.domain.WorkloadClaimRequest
+import io.airbyte.workload.api.domain.WorkloadFailureRequest
+import io.airbyte.workload.api.domain.WorkloadLaunchedRequest
+import io.airbyte.workload.api.domain.WorkloadQueuePollRequest
+import io.airbyte.workload.launcher.authn.DataplaneIdentityService
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micronaut.context.annotation.Value
 import jakarta.inject.Singleton
@@ -19,22 +22,19 @@ private val logger = KotlinLogging.logger {}
 
 @Singleton
 class WorkloadApiClient(
-  private val workloadApiClient: io.airbyte.workload.api.client.WorkloadApiClient,
-  @Value("\${airbyte.data-plane-id}") private val dataplaneId: String,
+  private val workloadApiClient: WorkloadApiClient,
+  private val identityService: DataplaneIdentityService,
   @Value("\${micronaut.application.name}") private val applicationName: String,
 ) {
-  fun reportFailure(failure: StageError) {
-    // This should never happen, but if it does, we should avoid blowing up.
-    if (failure.stageName == StageName.CLAIM) {
-      logger.warn { "Unexpected StageError for stage: ${StageName.CLAIM}. Ignoring." }
-      return
-    }
-
+  fun reportFailure(
+    workloadId: String,
+    error: Throwable,
+  ) {
     try {
-      updateStatusToFailed(failure.io.msg.workloadId, ExceptionUtils.exceptionStackTrace(failure))
+      updateStatusToFailed(workloadId, ExceptionUtils.exceptionStackTrace(error))
     } catch (e: Exception) {
       logger.warn(e) {
-        "Could not set the status for workload ${failure.io.msg.workloadId} to failed.\n" +
+        "Could not set the status for workload $workloadId to failed.\n" +
           "Exception: $e\n" +
           "message: ${e.message}\n" +
           "stackTrace: ${e.stackTrace}\n"
@@ -53,32 +53,35 @@ class WorkloadApiClient(
         reason,
       )
     logger.info { "Attempting to update workload: $workloadId to FAILED." }
-    workloadApiClient.workloadApi.workloadFailure(request)
+    workloadApiClient.workloadFailure(request)
   }
 
   fun updateStatusToLaunched(workloadId: String) {
     val request = WorkloadLaunchedRequest(workloadId)
     logger.info { "Attempting to update workload: $workloadId to LAUNCHED." }
-    workloadApiClient.workloadApi.workloadLaunched(request)
+    workloadApiClient.workloadLaunched(request)
   }
 
   fun claim(workloadId: String): Boolean {
+    val dataplaneId = identityService.getDataplaneId()
+    val dataplaneName = identityService.getDataplaneName()
     var result = false
+
+    val req =
+      WorkloadClaimRequest(
+        workloadId,
+        dataplaneId,
+      )
 
     try {
       val resp: ClaimResponse =
-        workloadApiClient.workloadApi.workloadClaim(
-          WorkloadClaimRequest(
-            workloadId,
-            dataplaneId,
-          ),
-        )
-      logger.info { "Claimed: ${resp.claimed} for $workloadId via API for $dataplaneId" }
+        workloadApiClient.workloadClaim(req)
+      logger.info { "Claimed: ${resp.claimed} for workload $workloadId via API in dataplane $dataplaneName ($dataplaneId)" }
 
       result = resp.claimed
     } catch (e: Exception) {
       logger.error(e) {
-        "Error claiming workload $workloadId via API for $dataplaneId.\n" +
+        "Error claiming workload $workloadId via API in dataplane $dataplaneName ($dataplaneId).\n" +
           "Exception: $e\n" +
           "message: ${e.message}\n" +
           "stackTrace: ${e.stackTrace}\n"
@@ -86,5 +89,17 @@ class WorkloadApiClient(
     }
 
     return result
+  }
+
+  fun pollQueue(
+    groupId: String?,
+    priority: WorkloadPriority?,
+    pollSizeItems: Int,
+  ): List<Workload> {
+    val req = WorkloadQueuePollRequest(quantity = pollSizeItems, dataplaneGroup = groupId, priority = priority)
+
+    val resp = workloadApiClient.pollWorkloadQueue(req)
+
+    return resp.workloads
   }
 }

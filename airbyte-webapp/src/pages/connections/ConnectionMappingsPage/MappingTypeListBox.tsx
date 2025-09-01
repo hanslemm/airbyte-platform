@@ -1,7 +1,6 @@
 import { FormattedMessage } from "react-intl";
 
 import { FlexContainer } from "components/ui/Flex";
-import { Icon } from "components/ui/Icon";
 import { ListBox, ListBoxControlButtonProps } from "components/ui/ListBox";
 import { Text } from "components/ui/Text";
 
@@ -9,11 +8,18 @@ import { MapperConfiguration, StreamMapperType } from "core/api/types/AirbyteCli
 
 import { useMappingContext } from "./MappingContext";
 import styles from "./MappingRow.module.scss";
-import { OperationType } from "./RowFilteringMapperForm";
 import { StreamMapperWithId } from "./types";
 
+enum OperationType {
+  equal = "EQUAL",
+  not = "NOT",
+}
+
+export const supportedMappings = ["hashing", "field-renaming", "row-filtering", "encryption"] as const;
+export type SupportedMapping = (typeof supportedMappings)[number];
+
 interface MappingTypeListBoxProps {
-  selectedValue: StreamMapperType;
+  selectedValue: SupportedMapping;
   streamDescriptorKey: string;
   mappingId: string;
   disabled: boolean;
@@ -41,9 +47,8 @@ export const MappingTypeListBox: React.FC<MappingTypeListBoxProps> = ({
       title: "connections.mappings.type.encryption",
       description: "connections.mappings.type.encryption.description",
     },
-  };
-
-  const supportedMappingsOptions = Object.values(StreamMapperType).map((type) => ({
+  } as const;
+  const supportedMappingsOptions = supportedMappings.map((type) => ({
     label: (
       <FlexContainer direction="column" gap="xs" as="span">
         <Text as="span">
@@ -57,7 +62,7 @@ export const MappingTypeListBox: React.FC<MappingTypeListBoxProps> = ({
     value: type,
   }));
 
-  const ControlButton: React.FC<ListBoxControlButtonProps<StreamMapperType>> = ({ selectedOption, isDisabled }) => {
+  const ControlButton: React.FC<ListBoxControlButtonProps<SupportedMapping>> = ({ selectedOption, isDisabled }) => {
     if (!selectedOption) {
       return (
         <Text color="grey" as="span">
@@ -71,7 +76,6 @@ export const MappingTypeListBox: React.FC<MappingTypeListBoxProps> = ({
         <Text as="span" color={isDisabled ? "grey300" : "darkBlue"}>
           <FormattedMessage id={mappingTypeLabels[selectedOption.value].title} />
         </Text>
-        <Icon type="caretDown" color="disabled" />
       </FlexContainer>
     );
   };
@@ -80,7 +84,7 @@ export const MappingTypeListBox: React.FC<MappingTypeListBoxProps> = ({
     <ListBox
       options={supportedMappingsOptions}
       selectedValue={selectedValue}
-      controlButton={ControlButton}
+      controlButtonContent={ControlButton}
       buttonClassName={styles.controlButton}
       isDisabled={disabled}
       onSelect={(value) => {

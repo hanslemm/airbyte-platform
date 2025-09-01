@@ -9,32 +9,42 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import classNames from "classnames";
 import React, { useMemo, useState, useCallback } from "react";
-import { useFormContext } from "react-hook-form";
+import { get, useFormContext, useFormState, useWatch } from "react-hook-form";
 import { FormattedMessage, useIntl } from "react-intl";
 
+import { FormControl } from "components/forms";
+import { FormControlErrorMessage, FormControlFooter } from "components/forms/FormControl";
 import { ControlLabels } from "components/LabeledControl";
+import { Badge } from "components/ui/Badge";
 import { Button } from "components/ui/Button";
 import { Card } from "components/ui/Card";
 import { FlexContainer } from "components/ui/Flex";
 import { Icon } from "components/ui/Icon";
 import { Message } from "components/ui/Message";
 import { Text } from "components/ui/Text";
+import { Tooltip } from "components/ui/Tooltip";
 
-import { useConnectorBuilderFormState } from "services/connectorBuilder/ConnectorBuilderStateService";
+import { Spec, SpecConnectionSpecification } from "core/api/types/ConnectorManifest";
+import { AirbyteJSONSchema } from "core/jsonSchema/types";
+import {
+  useConnectorBuilderFormState,
+  useConnectorBuilderPermission,
+} from "services/connectorBuilder/ConnectorBuilderStateService";
 
 import { BuilderConfigView } from "./BuilderConfigView";
-import { BuilderField } from "./BuilderField";
 import { KeyboardSensor, PointerSensor } from "./dndSensors";
-import { InputForm, InputInEditing, newInputInEditing, supportedTypes } from "./InputsForm";
+import { InputModal, InputInEditing, newInputInEditing, supportedTypes } from "./InputModal";
 import styles from "./InputsView.module.scss";
+import { SecretField } from "./SecretField";
 import { BuilderFormInput } from "../types";
 import { useBuilderWatch } from "../useBuilderWatch";
 
 export const InputsView: React.FC = () => {
   const { formatMessage } = useIntl();
-  const inputs = useBuilderWatch("formValues.inputs");
+  const spec = useBuilderWatch("manifest.spec");
+  const inputs = useMemo(() => convertToBuilderFormInputs(spec), [spec]);
   const { setValue } = useFormContext();
-  const { permission } = useConnectorBuilderFormState();
+  const permission = useConnectorBuilderPermission();
   const [inputInEditing, setInputInEditing] = useState<InputInEditing | undefined>(undefined);
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -43,10 +53,7 @@ export const InputsView: React.FC = () => {
     })
   );
 
-  const inputsWithIds = useMemo(
-    () => inputs.filter((input) => !input.definition.airbyte_hidden).map((input) => ({ input, id: input.key })),
-    [inputs]
-  );
+  const inputsWithIds = useMemo(() => inputs.map((input) => ({ input, id: input.key })), [inputs]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -54,7 +61,10 @@ export const InputsView: React.FC = () => {
     if (over !== null && active.id !== over.id) {
       const oldIndex = inputs.findIndex((input) => input.key === active.id.toString());
       const newIndex = inputs.findIndex((input) => input.key === over.id.toString());
-      setValue("formValues.inputs", arrayMove(inputs, oldIndex, newIndex));
+      setValue(
+        "manifest.spec.connection_specification",
+        convertToConnectionSpecification(arrayMove(inputs, oldIndex, newIndex))
+      );
     }
   };
 
@@ -88,7 +98,7 @@ export const InputsView: React.FC = () => {
         </Button>
 
         {inputInEditing && (
-          <InputForm
+          <InputModal
             inputInEditing={inputInEditing}
             onClose={() => {
               setInputInEditing(undefined);
@@ -136,7 +146,7 @@ interface SortableInputProps {
 
 const SortableInput: React.FC<SortableInputProps> = ({ input, id, setInputInEditing }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const { permission } = useConnectorBuilderFormState();
+  const permission = useConnectorBuilderPermission();
   const canEdit = permission !== "readOnly";
 
   const style = {
@@ -150,6 +160,8 @@ const SortableInput: React.FC<SortableInputProps> = ({ input, id, setInputInEdit
     () => setInputInEditing(formInputToInputInEditing(input)),
     [input, setInputInEditing]
   );
+
+  const inputId = `testing-value-${input.key}`;
 
   return (
     <div ref={setNodeRef} style={style} className={classNames({ [styles.dragging]: isDragging })}>
@@ -170,6 +182,21 @@ const SortableInput: React.FC<SortableInputProps> = ({ input, id, setInputInEdit
               label={input.definition.title || input.key}
               optional={!input.required}
               infoTooltipContent={input.definition.description}
+              htmlFor={inputId}
+              labelAction={
+                input.definition.airbyte_hidden && (
+                  <Tooltip
+                    control={
+                      <Badge variant="grey">
+                        <FormattedMessage id="connectorBuilder.inputsView.hiddenBadge" />
+                      </Badge>
+                    }
+                    placement="top"
+                  >
+                    <FormattedMessage id="connectorBuilder.inputsView.hiddenBadgeTooltip" />
+                  </Tooltip>
+                )
+              }
             />
             <Button
               className={styles.itemButton}
@@ -182,7 +209,7 @@ const SortableInput: React.FC<SortableInputProps> = ({ input, id, setInputInEdit
               <Icon type="gear" color="action" />
             </Button>
           </FlexContainer>
-          <InputFormControl builderInput={input} openInputForm={openInputForm} />
+          <InputFormControl builderInput={input} openInputForm={openInputForm} id={inputId} />
         </FlexContainer>
       </Card>
     </div>
@@ -192,64 +219,204 @@ const SortableInput: React.FC<SortableInputProps> = ({ input, id, setInputInEdit
 const InputFormControl = ({
   builderInput,
   openInputForm,
+  id,
 }: {
   builderInput: BuilderFormInput;
   openInputForm: () => void;
+  id: string;
 }) => {
   const { toggleUI } = useConnectorBuilderFormState();
   const { definition } = builderInput;
+  const unrecognizedTypeElement = useMemo(
+    () => (
+      <Message
+        type="error"
+        text={
+          <FormattedMessage
+            id="connectorBuilder.unsupportedInputType.primary"
+            values={{ type: definition.type ?? "undefined" }}
+          />
+        }
+        secondaryText={
+          <FormattedMessage
+            id="connectorBuilder.unsupportedInputType.secondary"
+            values={{
+              openInputButton: (children: React.ReactNode) => (
+                <Button className={styles.unsupportedInputTypeAction} variant="link" onClick={openInputForm}>
+                  {children}
+                </Button>
+              ),
+              switchToYamlButton: (children: React.ReactNode) => (
+                <Button className={styles.unsupportedInputTypeAction} variant="link" onClick={() => toggleUI("yaml")}>
+                  {children}
+                </Button>
+              ),
+            }}
+          />
+        }
+      />
+    ),
+    [definition.type, openInputForm, toggleUI]
+  );
   const fieldPath = `testingValues.${builderInput.key}`;
+
+  return (
+    <DefinitionFormControl
+      name={fieldPath}
+      id={id}
+      definition={definition}
+      unrecognizedTypeElement={unrecognizedTypeElement}
+    />
+  );
+};
+
+export const DefinitionFormControl = ({
+  name,
+  id,
+  definition,
+  unrecognizedTypeElement,
+  label,
+}: {
+  name: string;
+  id: string;
+  definition: AirbyteJSONSchema;
+  unrecognizedTypeElement: JSX.Element | null;
+  label?: string;
+}) => {
+  const value = useWatch({ name });
+  const { setValue } = useFormContext();
+
+  const defaultProps = {
+    name,
+    label,
+    id,
+    "data-field-path": name,
+  };
 
   switch (definition.type) {
     case "string": {
       if (definition.enum) {
+        if (definition.enum.length === 0) {
+          return null;
+        }
         const options = definition.enum.map((val) => ({ label: String(val), value: String(val) }));
-        return <BuilderField type="enum" options={options} path={fieldPath} />;
+        return <FormControl {...defaultProps} fieldType="dropdown" options={options} />;
       }
 
       if (definition.format === "date" || definition.format === "date-time") {
-        return <BuilderField type={definition.format} path={fieldPath} />;
+        return <FormControl {...defaultProps} fieldType="date" format={definition.format} />;
       }
 
       if (definition.airbyte_secret) {
-        return <BuilderField type="secret" path={fieldPath} />;
+        return (
+          <SecretDefinitionFormControl
+            {...defaultProps}
+            value={value as string}
+            onUpdate={(val) => {
+              // Remove the value instead of setting it to the empty string, as secret persistence
+              // gets mad at empty secrets
+              setValue(name, val || undefined);
+            }}
+          />
+        );
       }
 
-      return <BuilderField type="string" path={fieldPath} />;
+      return <FormControl {...defaultProps} fieldType="input" />;
     }
     case "integer":
     case "number":
+      return <FormControl {...defaultProps} fieldType="input" type="number" />;
     case "boolean":
+      return <FormControl {...defaultProps} fieldType="switch" />;
     case "array":
-      return <BuilderField type={definition.type} path={fieldPath} />;
+      return <FormControl {...defaultProps} fieldType="array" itemType="string" />;
     default:
-      return (
-        <Message
-          type="error"
-          text={
-            <FormattedMessage
-              id="connectorBuilder.unsupportedInputType.primary"
-              values={{ type: definition.type ?? "undefined" }}
-            />
-          }
-          secondaryText={
-            <FormattedMessage
-              id="connectorBuilder.unsupportedInputType.secondary"
-              values={{
-                openInputButton: (children: React.ReactNode) => (
-                  <Button className={styles.unsupportedInputTypeAction} variant="link" onClick={openInputForm}>
-                    {children}
-                  </Button>
-                ),
-                switchToYamlButton: (children: React.ReactNode) => (
-                  <Button className={styles.unsupportedInputTypeAction} variant="link" onClick={() => toggleUI("yaml")}>
-                    {children}
-                  </Button>
-                ),
-              }}
-            />
-          }
-        />
-      );
+      return unrecognizedTypeElement;
   }
+};
+
+const SecretDefinitionFormControl = ({
+  name,
+  label,
+  id,
+  "data-field-path": dataFieldPath,
+  value,
+  onUpdate,
+}: {
+  name: string;
+  label?: string;
+  id: string;
+  "data-field-path": string;
+  value: string;
+  onUpdate: (val: string) => void;
+}) => {
+  const { errors } = useFormState({ name });
+  const error = get(errors, name);
+  return (
+    <FlexContainer direction="column" className={styles.secretField}>
+      <SecretField
+        name={name}
+        label={label}
+        id={id}
+        data-field-path={dataFieldPath}
+        value={value}
+        onUpdate={onUpdate}
+        error={!!error}
+      />
+      <FormControlFooter>
+        <FormControlErrorMessage name={name} />
+      </FormControlFooter>
+    </FlexContainer>
+  );
+};
+
+export const convertToBuilderFormInputs = (spec: Spec | undefined): BuilderFormInput[] => {
+  if (!spec || !("properties" in spec.connection_specification)) {
+    return [];
+  }
+  if (
+    typeof spec.connection_specification.properties !== "object" ||
+    spec.connection_specification.properties === null
+  ) {
+    return [];
+  }
+  const properties = spec.connection_specification.properties;
+
+  const required: string[] =
+    spec.connection_specification.required &&
+    Array.isArray(spec.connection_specification.required) &&
+    spec.connection_specification.required.every((value) => typeof value === "string")
+      ? spec.connection_specification.required
+      : [];
+
+  return Object.entries(properties)
+    .sort(([_keyA, valueA], [_keyB, valueB]) => {
+      if (valueA.order !== undefined && valueB.order !== undefined) {
+        return valueA.order - valueB.order;
+      }
+      if (valueA.order !== undefined && valueB.order === undefined) {
+        return -1;
+      }
+      if (valueA.order === undefined && valueB.order !== undefined) {
+        return 1;
+      }
+      return 0;
+    })
+    .map(([specKey, specDefinition]) => {
+      return {
+        key: specKey,
+        definition: specDefinition,
+        required: required?.includes(specKey) || false,
+      };
+    });
+};
+
+export const convertToConnectionSpecification = (inputs: BuilderFormInput[]): SpecConnectionSpecification => {
+  return {
+    $schema: "http://json-schema.org/draft-07/schema#",
+    type: "object",
+    required: inputs.filter((input) => input.required).map((input) => input.key),
+    properties: Object.fromEntries(inputs.map((input, index) => [input.key, { ...input.definition, order: index }])),
+    additionalProperties: true,
+  };
 };

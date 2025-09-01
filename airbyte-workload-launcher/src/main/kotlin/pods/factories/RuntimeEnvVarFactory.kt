@@ -4,7 +4,7 @@
 
 package io.airbyte.workload.launcher.pods.factories
 
-import com.google.common.annotations.VisibleForTesting
+import io.airbyte.commons.annotation.InternalForTesting
 import io.airbyte.config.Configs
 import io.airbyte.config.WorkerEnvConstants
 import io.airbyte.config.WorkloadType
@@ -16,30 +16,32 @@ import io.airbyte.featureflag.ContainerOrchestratorJavaOpts
 import io.airbyte.featureflag.Context
 import io.airbyte.featureflag.FeatureFlagClient
 import io.airbyte.featureflag.InjectAwsSecretsToConnectorPods
+import io.airbyte.featureflag.Multi
 import io.airbyte.featureflag.Organization
+import io.airbyte.featureflag.ReplicationDebugLogLevelEnabled
 import io.airbyte.featureflag.UseAllowCustomCode
 import io.airbyte.featureflag.UseRuntimeSecretPersistence
 import io.airbyte.featureflag.Workspace
 import io.airbyte.persistence.job.models.IntegrationLauncherConfig
 import io.airbyte.persistence.job.models.ReplicationInput
-import io.airbyte.workers.helper.ConnectorApmSupportHelper
 import io.airbyte.workers.input.getAttemptId
 import io.airbyte.workers.input.getJobId
 import io.airbyte.workers.pod.Metadata.AWS_ASSUME_ROLE_EXTERNAL_ID
-import io.airbyte.workers.pod.ResourceConversionUtils
 import io.airbyte.workload.launcher.constants.EnvVarConstants
+import io.airbyte.workload.launcher.helper.ConnectorApmSupportHelper
 import io.airbyte.workload.launcher.model.toEnvVarList
+import io.airbyte.workload.launcher.pods.ResourceConversionUtils
 import io.fabric8.kubernetes.api.model.EnvVar
 import io.micronaut.context.annotation.Value
 import jakarta.inject.Named
 import jakarta.inject.Singleton
 import java.util.UUID
+import kotlin.collections.plus
 import io.airbyte.commons.envvar.EnvVar as AirbyteEnvVar
 import io.airbyte.config.ResourceRequirements as AirbyteResourceRequirements
 
 /**
- * Legacy deployment mode environment variable that is still used by some
- * connectors.
+ * Legacy deployment mode environment variable that is still used by some connectors.
  */
 internal const val CLOUD_DEPLOYMENT_MODE = "CLOUD"
 internal const val DEPLOYMENT_MODE = "DEPLOYMENT_MODE"
@@ -47,6 +49,7 @@ internal const val OSS_DEPLOYMENT_MODE = "OSS"
 
 /**
  * Performs dynamic mapping of config to env vars based on runtime inputs.
+ *
  * For static stat time configuration see EnvVarConfigBeanFactory.
  */
 @Singleton
@@ -54,17 +57,26 @@ class RuntimeEnvVarFactory(
   @Named("connectorAwsAssumedRoleSecretEnv") private val connectorAwsAssumedRoleSecretEnvList: List<EnvVar>,
   @Value("\${airbyte.worker.job.kube.volumes.staging.mount-path}") private val stagingMountPath: String,
   @Value("\${airbyte.container.orchestrator.java-opts}") private val containerOrchestratorJavaOpts: String,
+  @Value("\${airbyte.container.orchestrator.enable-unsafe-code}") private val enableUnsafeCodeGlobalOverride: Boolean,
+  @Value("\${airbyte.logging.log-level}") private val logLevel: String,
   private val connectorApmSupportHelper: ConnectorApmSupportHelper,
   private val featureFlagClient: FeatureFlagClient,
   private val airbyteEdition: Configs.AirbyteEdition,
 ) {
-  fun orchestratorEnvVars(
+  internal fun orchestratorEnvVars(
     replicationInput: ReplicationInput,
     workloadId: String,
   ): List<EnvVar> {
     val optionsOverride: String = featureFlagClient.stringVariation(ContainerOrchestratorJavaOpts, Connection(replicationInput.connectionId))
     val javaOpts = optionsOverride.trim().ifEmpty { containerOrchestratorJavaOpts }
     val secretPersistenceEnvVars = getSecretPersistenceEnvVars(replicationInput.connectionContext.organizationId)
+    val useFileTransferEnvVar =
+      replicationInput.useFileTransfer == true &&
+        (replicationInput.omitFileTransferEnvVar == null || replicationInput.omitFileTransferEnvVar == false)
+    val logLevelEnvVars =
+      getLogLevelEnvVars(
+        Multi(listOf(Workspace(replicationInput.connectionContext.workspaceId), Connection(replicationInput.connectionContext.connectionId))),
+      )
 
     return listOf(
       EnvVar(AirbyteEnvVar.OPERATION_TYPE.toString(), WorkloadType.SYNC.toString(), null),
@@ -72,10 +84,10 @@ class RuntimeEnvVarFactory(
       EnvVar(AirbyteEnvVar.JOB_ID.toString(), replicationInput.getJobId(), null),
       EnvVar(AirbyteEnvVar.ATTEMPT_ID.toString(), replicationInput.getAttemptId().toString(), null),
       EnvVar(AirbyteEnvVar.CONNECTION_ID.toString(), replicationInput.connectionId.toString(), null),
-      EnvVar(EnvVarConstants.USE_FILE_TRANSFER, replicationInput.useFileTransfer.toString(), null),
+      EnvVar(EnvVarConstants.USE_FILE_TRANSFER, useFileTransferEnvVar.toString(), null),
       EnvVar(EnvVarConstants.JAVA_OPTS_ENV_VAR, javaOpts, null),
       EnvVar(EnvVarConstants.AIRBYTE_STAGING_DIRECTORY, stagingMountPath, null),
-    ) + secretPersistenceEnvVars
+    ) + secretPersistenceEnvVars + logLevelEnvVars
   }
 
   fun replicationConnectorEnvVars(
@@ -90,8 +102,11 @@ class RuntimeEnvVarFactory(
     val resourceEnvVars = getResourceEnvVars(resourceReqs)
     val customCodeEnvVars = getDeclarativeCustomCodeSupportEnvVars(Workspace(launcherConfig.workspaceId))
     val configPassThroughEnv = launcherConfig.additionalEnvironmentVariables?.toEnvVarList().orEmpty()
+    val logLevelEnvVars =
+      getLogLevelEnvVars(Multi(listOf(Workspace(launcherConfig.workspaceId), Connection(launcherConfig.connectionId))))
 
-    return awsEnvVars + apmEnvVars + configurationEnvVars + metadataEnvVars + resourceEnvVars + configPassThroughEnv + customCodeEnvVars
+    return awsEnvVars + apmEnvVars + configurationEnvVars + metadataEnvVars + resourceEnvVars + configPassThroughEnv + customCodeEnvVars +
+      logLevelEnvVars
   }
 
   // TODO: Separate env factory methods per container (init, sidecar, main, etc.)
@@ -130,7 +145,7 @@ class RuntimeEnvVarFactory(
   /**
    * Env vars to enable APM metrics for the connector if enabled.
    */
-  @VisibleForTesting
+  @InternalForTesting
   internal fun getConnectorApmEnvVars(
     image: String,
     context: Context,
@@ -143,10 +158,21 @@ class RuntimeEnvVarFactory(
     return connectorApmEnvVars.toList()
   }
 
+  @InternalForTesting
+  internal fun getLogLevelEnvVars(context: Context): List<EnvVar> {
+    val replicationDebugLogLevelEnabled = featureFlagClient.boolVariation(ReplicationDebugLogLevelEnabled, context)
+
+    return if (replicationDebugLogLevelEnabled) {
+      listOf(EnvVar(EnvVarConstants.LOG_LEVEL, "debug", null))
+    } else {
+      listOf(EnvVar(EnvVarConstants.LOG_LEVEL, logLevel, null))
+    }
+  }
+
   /**
    * Metadata env vars. Unsure of purpose. Copied from AirbyteIntegrationLauncher.
    */
-  @VisibleForTesting
+  @InternalForTesting
   internal fun getMetadataEnvVars(launcherConfig: IntegrationLauncherConfig): List<EnvVar> =
     listOf(
       // Connectors still rely on the DEPLOYMENT_MODE env var, so map the Airbyte edition to it.
@@ -159,7 +185,7 @@ class RuntimeEnvVarFactory(
   /**
    * Env vars that specify the resource limits of the connectors. For use by the connectors.
    */
-  @VisibleForTesting
+  @InternalForTesting
   internal fun getResourceEnvVars(resourceReqs: AirbyteResourceRequirements?): List<EnvVar> {
     val envList = mutableListOf<EnvVar>()
     if (resourceReqs?.ephemeralStorageLimit != null) {
@@ -176,7 +202,7 @@ class RuntimeEnvVarFactory(
    * These theoretically configure runtime connector behavior. Copied from AirbyteIntegrationLauncher.
    * Unsure if still necessary.
    */
-  @VisibleForTesting
+  @InternalForTesting
   internal fun getConfigurationEnvVars(
     dockerImage: String,
     connectionId: UUID,
@@ -200,7 +226,7 @@ class RuntimeEnvVarFactory(
   /**
    * Env vars for controlling runtime secrets hydration behavior.
    */
-  @VisibleForTesting
+  @InternalForTesting
   internal fun getSecretPersistenceEnvVars(organizationId: UUID): List<EnvVar> {
     val useRuntimeSecretPersistence = featureFlagClient.boolVariation(UseRuntimeSecretPersistence, Organization(organizationId))
 
@@ -212,19 +238,26 @@ class RuntimeEnvVarFactory(
   /**
    * Env vars for controlling runtime custom code execution behaviour.
    */
-  @VisibleForTesting
+  @InternalForTesting
   internal fun getDeclarativeCustomCodeSupportEnvVars(context: Context): List<EnvVar> {
     val useAllowCustomCode = featureFlagClient.boolVariation(UseAllowCustomCode, context)
 
+    // Turn on unsafe code execution if the feature flag is enabled or the global override is set.
+    // PROBLEM TO WORKAROUND: We do not haven't the ability to set feature flags for OSS/Enterprise customers.
+    // HACK: We in stead use a global override in the form of an environment variable AIRBYTE_ENABLE_UNSAFE_CODE.
+    //       Any customer can set this environment variable to enable unsafe code execution.
+    // WHEN TO REMOVE: When we have the ability to set feature flags for OSS/Enterprise customers.
+    val useUnsafeCode = useAllowCustomCode || enableUnsafeCodeGlobalOverride
+
     return listOf(
-      EnvVar(EnvVarConstants.AIRBYTE_ALLOW_CUSTOM_CODE_ENV_VAR, useAllowCustomCode.toString(), null),
+      EnvVar(EnvVarConstants.AIRBYTE_ENABLE_UNSAFE_CODE_ENV_VAR, useUnsafeCode.toString(), null),
     )
   }
 
   /**
    * Conditionally adds AWS assumed role env vars for use by connector pods.
    */
-  @VisibleForTesting
+  @InternalForTesting
   internal fun resolveAwsAssumedRoleEnvVars(launcherConfig: IntegrationLauncherConfig): List<EnvVar> {
     // Only inject into connectors we own.
     if (launcherConfig.isCustomConnector) {
@@ -244,6 +277,6 @@ class RuntimeEnvVarFactory(
   }
 
   companion object {
-    const val MYSQL_SOURCE_NAME = "airbyte/source-mysql"
+    internal const val MYSQL_SOURCE_NAME = "airbyte/source-mysql"
   }
 }

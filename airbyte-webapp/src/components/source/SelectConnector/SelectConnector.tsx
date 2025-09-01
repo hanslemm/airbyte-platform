@@ -6,6 +6,7 @@ import { useDebounce } from "react-use";
 import { match } from "ts-pattern";
 
 import { ConnectorIcon } from "components/ConnectorIcon";
+import { TeamsFeaturesWarnModal } from "components/TeamsFeaturesWarnModal";
 import { Button } from "components/ui/Button";
 import { CheckBox } from "components/ui/CheckBox";
 import { FlexContainer } from "components/ui/Flex";
@@ -20,6 +21,8 @@ import { EnterpriseSourceStub } from "core/api/types/AirbyteClient";
 import { ConnectorDefinition, ConnectorDefinitionOrEnterpriseStub } from "core/domain/connector";
 import { isSourceDefinition } from "core/domain/connector/source";
 import { Action, Namespace, useAnalyticsService } from "core/services/analytics";
+import { useOrganizationSubscriptionStatus } from "core/utils/useOrganizationSubscriptionStatus";
+import { useExperiment } from "hooks/services/Experiment";
 import { useModalService } from "hooks/services/Modal";
 import { useAirbyteTheme } from "hooks/theme/useAirbyteTheme";
 import { RoutePaths, SourcePaths } from "pages/routePaths";
@@ -57,6 +60,8 @@ export const SelectConnector: React.FC<SelectConnectorProps> = ({
   const { openModal } = useModalService();
   const trackSelectConnector = useTrackSelectConnector(connectorType);
   const trackSelectEnterpriseStub = useTrackSelectEnterpriseStub();
+  const { isInTrial } = useOrganizationSubscriptionStatus();
+  const showTeamsFeaturesWarnModal = useExperiment("entitlements.showTeamsFeaturesWarnModal");
 
   const [showAirbyteConnectors, setShowAirbyteConnectors] = useState(true);
   const [showEnterpriseConnectors, setShowEnterpriseConnectors] = useState(true);
@@ -95,7 +100,7 @@ export const SelectConnector: React.FC<SelectConnectorProps> = ({
   by splitting these into source_* and destination_* , we avoid a fun race condition:
     * the views in this flow are based on a mix of component states and URL params
     * filters are stored in and read from URL params
-  
+
   If the filter names are kept the same between source and destination selection,
   when in an empty workspace (no sources or destinations), and selecting a source connector after applying filters, the following happens:
     * any filters are stored in the URL
@@ -130,16 +135,28 @@ export const SelectConnector: React.FC<SelectConnectorProps> = ({
   const navigate = useNavigate();
 
   const handleConnectorButtonClick = (definition: ConnectorDefinitionOrEnterpriseStub) => {
-    if ("isEnterprise" in definition) {
-      // Handle EnterpriseSourceStubs first
-      trackSelectEnterpriseStub(definition);
-      onSelectEnterpriseSourceStub(definition);
-    } else if (isSourceDefinition(definition)) {
-      trackSelectConnector(definition.sourceDefinitionId, definition.name);
-      onSelectConnectorDefinition(definition.sourceDefinitionId);
+    const proceedWithConnectorSelection = () => {
+      if ("isEnterprise" in definition) {
+        // Handle EnterpriseSourceStubs first
+        trackSelectEnterpriseStub(definition);
+        onSelectEnterpriseSourceStub(definition);
+      } else if (isSourceDefinition(definition)) {
+        trackSelectConnector(definition.sourceDefinitionId, definition.name);
+        onSelectConnectorDefinition(definition.sourceDefinitionId);
+      } else {
+        trackSelectConnector(definition.destinationDefinitionId, definition.name);
+        onSelectConnectorDefinition(definition.destinationDefinitionId);
+      }
+    };
+
+    if ("isEnterprise" in definition && isInTrial && showTeamsFeaturesWarnModal) {
+      openModal({
+        title: null,
+        content: () => <TeamsFeaturesWarnModal onContinue={proceedWithConnectorSelection} />,
+        size: "xl",
+      });
     } else {
-      trackSelectConnector(definition.destinationDefinitionId, definition.name);
-      onSelectConnectorDefinition(definition.destinationDefinitionId);
+      proceedWithConnectorSelection();
     }
   };
 
@@ -195,12 +212,15 @@ export const SelectConnector: React.FC<SelectConnectorProps> = ({
     return connectorDefinitions;
   }, [connectorType, connectorDefinitions, enterpriseSourceDefinitions]);
 
+  function keywordMatch(definition: ConnectorDefinitionOrEnterpriseStub, searchTerm: string) {
+    const keywords = searchTerm.toLowerCase().split(" ").filter(Boolean);
+    const name = definition.name.toLowerCase();
+    return keywords.every((keyword) => name.includes(keyword));
+  }
+
   // Filter all connectors based on search term
   const allSearchResults = useMemo(
-    () =>
-      connectorListWithEnterpriseStubs.filter((definition) =>
-        definition.name.toLowerCase().includes(searchTerm.toLocaleLowerCase())
-      ),
+    () => connectorListWithEnterpriseStubs.filter((definition) => keywordMatch(definition, searchTerm)),
     [connectorListWithEnterpriseStubs, searchTerm]
   );
 
@@ -303,7 +323,6 @@ export const SelectConnector: React.FC<SelectConnectorProps> = ({
               data-testid={`see-more-${tabName}`}
               type="button"
               variant="secondary"
-              className={styles.selectConnector__seeMore}
               onClick={() => setSelectedTab(tabName)}
             >
               <FlexContainer alignItems="center" gap="lg">
@@ -346,7 +365,7 @@ export const SelectConnector: React.FC<SelectConnectorProps> = ({
       >
         <SearchInput
           value={searchTerm}
-          onChange={(e) => setFilterValue(searchFilterName, e.target.value)}
+          onChange={(value) => setFilterValue(searchFilterName, value)}
           placeholder={formatMessage(
             { id: "connector.searchPlaceholder" },
             { tabName: getTabDisplayName(selectedTab) }

@@ -7,14 +7,17 @@ import { Text } from "components/ui/Text";
 import {
   CatalogDiff,
   ConnectionEventType,
+  ConnectionSyncProgressRead,
   FieldTransform,
   FieldTransformTransformType,
+  JobConfigType,
   StreamFieldStatusChanged,
   StreamTransform,
   StreamTransformTransformType,
 } from "core/api/types/AirbyteClient";
 
 import { CatalogConfigDiffExtended } from "./components/CatalogChangeEventItem";
+import { ConnectionRunningEventType, ConnectionTimelineRunningEvent } from "./types";
 
 /**
  * GENERAL TIMELINE UTILITIES
@@ -40,6 +43,7 @@ export const titleIdMap: Record<ConnectionEventType, string> = {
   [ConnectionEventType.SYNC_STARTED]: "connection.timeline.sync_started",
   [ConnectionEventType.REFRESH_STARTED]: "connection.timeline.refresh_started",
   [ConnectionEventType.SCHEMA_UPDATE]: "connection.timeline.schema_update",
+  [ConnectionEventType.SCHEMA_CONFIG_UPDATE]: "connection.timeline.schema_config_update",
 
   // todo
   [ConnectionEventType.CONNECTOR_UPDATE]: "",
@@ -68,12 +72,49 @@ export const getStatusIcon = (jobStatus: "failed" | "incomplete" | "cancelled" |
 };
 
 /**
+ * Create a purely FE running event from a job
+ */
+export const createRunningEventFromJob = (
+  syncProgressData: ConnectionSyncProgressRead,
+  connectionId: string
+): ConnectionTimelineRunningEvent => {
+  const jobMapping: Record<
+    keyof Pick<typeof JobConfigType, "sync" | "refresh" | "clear" | "reset_connection">,
+    ConnectionRunningEventType
+  > = {
+    [JobConfigType.sync]: ConnectionRunningEventType.SYNC_RUNNING,
+    [JobConfigType.refresh]: ConnectionRunningEventType.REFRESH_RUNNING,
+    [JobConfigType.clear]: ConnectionRunningEventType.CLEAR_RUNNING,
+    [JobConfigType.reset_connection]: ConnectionRunningEventType.CONNECTION_RESET_RUNNING,
+  };
+
+  const eventType = jobMapping[syncProgressData.configType as keyof typeof jobMapping];
+
+  return {
+    id: "running",
+    eventType,
+    connectionId,
+    createdAt: syncProgressData.syncStartedAt ?? Date.now() / 1000,
+    summary: {
+      streams: syncProgressData.streams.map((stream) => ({
+        streamName: stream.streamName,
+        streamNamespace: stream.streamNamespace,
+        configType: stream.configType,
+      })),
+      configType: syncProgressData.configType,
+      jobId: syncProgressData.jobId ?? 0,
+    },
+    user: { email: "", name: "", id: "", isDeleted: false },
+  };
+};
+
+/**
  * FILTER UTILITIES
  */
 
 export interface TimelineFilterValues {
   status: "success" | "failure" | "incomplete" | "cancelled" | "";
-  eventCategory: "sync" | "clear" | "refresh" | "connection_settings" | "schema_update" | "";
+  eventCategory: "sync" | "clear" | "refresh" | "connection_settings" | "schema_update" | "schema_config_update" | "";
   startDate: string;
   endDate: string;
   eventId: string;
@@ -135,6 +176,7 @@ export const eventTypeByTypeFilterValue: Record<
     ConnectionEventType.CONNECTION_SETTINGS_UPDATE,
   ],
   schema_update: [ConnectionEventType.SCHEMA_UPDATE],
+  schema_config_update: [ConnectionEventType.SCHEMA_CONFIG_UPDATE],
 };
 
 export const getStatusByEventType = (eventType: ConnectionEventType) => {
@@ -231,6 +273,7 @@ export const eventTypeFilterOptions = (filterValues: TimelineFilterValues) => {
       ? [
           generateEventTypeFilterOption("connection_settings", "connection.timeline.filters.connection_settings"),
           generateEventTypeFilterOption("schema_update", "connection.timeline.filters.schema_update"),
+          generateEventTypeFilterOption("schema_config_update", "connection.timeline.filters.schema_config_update"),
         ]
       : []),
   ];

@@ -32,15 +32,21 @@ micronaut:
 
 airbyte:
   connector-registry:
-    seed-provider: ${CONNECTOR_REGISTRY_SEED_PROVIDER:local}
+    seed-provider: ${CONNECTOR_REGISTRY_SEED_PROVIDER:remote}
     remote:
       base-url: ${CONNECTOR_REGISTRY_BASE_URL:}
       timeout-ms: ${CONNECTOR_REGISTRY_TIMEOUT_MS:30000}
   license-key: ${AIRBYTE_LICENSE_KEY:}
   cron:
     update-definitions:
-      enabled: ${UPDATE_DEFINITIONS_CRON_ENABLED:false}
+      enabled: ${UPDATE_DEFINITIONS_CRON_ENABLED:true}
+    declarative-sources-updater:
+      enabled: ${RUN_DECLARATIVE_SOURCES_UPDATER:true}
+    db-prune:
+      enabled: ${DB_PRUNE_CRON_ENABLED:true}
   edition: ${AIRBYTE_EDITION:COMMUNITY}
+  entitlement:
+    client: ${ENTITLEMENT_CLIENT:}
   feature-flag:
     client: ${FEATURE_FLAG_CLIENT:}
     path: ${FEATURE_FLAG_PATH:/flags}
@@ -53,9 +59,6 @@ airbyte:
     min-version: ${AIRBYTE_PROTOCOL_VERSION_MIN:0.0.0}
     max-version: ${AIRBYTE_PROTOCOL_VERSION_MAX:0.3.0}
   role: ${AIRBYTE_ROLE:}
-  temporal:
-    worker:
-      ports: ${TEMPORAL_WORKER_PORTS:}
   tracking:
     strategy: ${TRACKING_STRATEGY:LOGGING}
     write-key: ${SEGMENT_WRITE_KEY:}
@@ -69,20 +72,49 @@ airbyte:
       heartbeat-check-rate: PT1M
       not-started-check-rate: PT1M
       non-sync-age-check-rate: PT1M
+      queue-depth-check-rate: PT1M
       sync-age-check-rate: PT1M
       non-sync-workload-timeout: ${NON_SYNC_WORKLOAD_TIMEOUT:PT4H} # Should be longer than the sum of the deadlines
       sync-workload-timeout: ${SYNC_WORKLOAD_TIMEOUT:P30D} # Should be longer than the sum of the deadlines
+    queue:
+      deletion-batch-size: ${WORKLOAD_QUEUE_DELETION_BATCH_SIZE:40000}
+      deletion-cron: 0 15 * * * ?
+  internal-api:
+    auth:
+      type: INTERNAL_CLIENT_TOKEN
+      signature-secret: ${AB_JWT_SIGNATURE_SECRET:}
   workload-api:
     base-path: ${WORKLOAD_API_HOST:}
-    bearer-token: ${WORKLOAD_API_BEARER_TOKEN:}
     connect-timeout-seconds: ${WORKLOAD_API_CONNECT_TIMEOUT_SECONDS:30}
     read-timeout-seconds: ${WORKLOAD_API_READ_TIMEOUT_SECONDS:300}
     retries:
       delay-seconds: ${WORKLOAD_API_RETRY_DELAY_SECONDS:2}
       max: ${WORKLOAD_API_MAX_RETRIES:5}
   workspace:
-    docker-mount: ${WORKSPACE_DOCKER_MOUNT:}
     root: ${WORKSPACE_ROOT}
+  secret:
+    persistence: ${SECRET_PERSISTENCE:TESTING_CONFIG_DB_TABLE}
+    store:
+      aws:
+        access-key: ${AWS_SECRET_MANAGER_ACCESS_KEY_ID:}
+        secret-key: ${AWS_SECRET_MANAGER_SECRET_ACCESS_KEY:}
+        region: ${AWS_SECRET_MANAGER_REGION:}
+        kmsKeyArn: ${AWS_KMS_KEY_ARN:}
+        tags: ${AWS_SECRET_MANAGER_SECRET_TAGS:}
+      gcp:
+        credentials: ${SECRET_STORE_GCP_CREDENTIALS:}
+        project-id: ${SECRET_STORE_GCP_PROJECT_ID:}
+        region: ${SECRET_STORE_GCP_REGION:}
+      vault:
+        address: ${VAULT_ADDRESS:}
+        prefix: ${VAULT_PREFIX:}
+        token: ${VAULT_AUTH_TOKEN:}
+      azure:
+        vault-url: ${AB_AZURE_KEY_VAULT_VAULT_URL:}
+        tenant-id: ${AB_AZURE_KEY_VAULT_TENANT_ID:}
+        client-id: ${AB_AZURE_KEY_VAULT_CLIENT_ID:}
+        client-secret: ${AB_AZURE_KEY_VAULT_CLIENT_SECRET:}
+        tags: ${AB_AZURE_KEY_VAULT_TAGS:}
 
 datasources:
   config:
@@ -95,7 +127,7 @@ datasources:
     url: ${DATABASE_URL}
     driverClassName: org.postgresql.Driver
     username: ${DATABASE_USER}
-    password: ${DATABASE_PASSWORD}
+    password: ${DATABASE_PASSWORD:}
   jobs:
     connection-test-query: SELECT 1
     connection-timeout: 30000
@@ -106,7 +138,19 @@ datasources:
     url: ${DATABASE_URL}
     driverClassName: org.postgresql.Driver
     username: ${DATABASE_USER}
-    password: ${DATABASE_PASSWORD}
+    password: ${DATABASE_PASSWORD:}
+  local-secrets:
+    connection-test-query: SELECT 1
+    connection-timeout: 30000
+    idle-timeout: 600000
+    initialization-fail-timeout: -1 # Disable fail fast checking to avoid issues due to other pods not being started in time
+    maximum-pool-size: 20
+    minimum-idle: 0
+    url: ${DATABASE_URL}
+    driverClassName: org.postgresql.Driver
+    username: ${DATABASE_USER}
+    password: ${DATABASE_PASSWORD:}
+    pool-name: config-pool
 
 docker:
   network: ${DOCKER_NETWORK:host}

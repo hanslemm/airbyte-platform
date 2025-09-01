@@ -4,11 +4,9 @@
 
 package io.airbyte.server.handlers
 
-import com.google.common.collect.ImmutableMap
-import com.google.common.collect.Sets
 import io.airbyte.analytics.TrackingClient
+import io.airbyte.api.client.WebUrlHelper
 import io.airbyte.api.model.generated.InviteCodeRequestBody
-import io.airbyte.api.model.generated.PermissionCreate
 import io.airbyte.api.model.generated.PermissionType
 import io.airbyte.api.model.generated.ScopeType
 import io.airbyte.api.model.generated.UserInvitationCreateRequestBody
@@ -19,13 +17,13 @@ import io.airbyte.commons.server.errors.ConflictException
 import io.airbyte.commons.server.errors.OperationNotAllowedException
 import io.airbyte.commons.server.handlers.PermissionHandler
 import io.airbyte.config.AuthenticatedUser
-import io.airbyte.config.ConfigSchema
+import io.airbyte.config.ConfigNotFoundType
 import io.airbyte.config.InvitationStatus
+import io.airbyte.config.Permission
 import io.airbyte.config.User
 import io.airbyte.config.UserInvitation
-import io.airbyte.config.persistence.PermissionPersistence
 import io.airbyte.config.persistence.UserPersistence
-import io.airbyte.data.exceptions.ConfigNotFoundException
+import io.airbyte.data.ConfigNotFoundException
 import io.airbyte.data.services.InvitationDuplicateException
 import io.airbyte.data.services.InvitationPermissionOverlapException
 import io.airbyte.data.services.InvitationStatusUnexpectedException
@@ -34,7 +32,6 @@ import io.airbyte.data.services.UserInvitationService
 import io.airbyte.data.services.WorkspaceService
 import io.airbyte.notification.CustomerIoEmailConfig
 import io.airbyte.notification.CustomerIoEmailNotificationSender
-import io.airbyte.persistence.job.WebUrlHelper
 import io.airbyte.server.handlers.apidomainmapping.UserInvitationMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.inject.Singleton
@@ -52,7 +49,6 @@ class UserInvitationHandler(
   val workspaceService: WorkspaceService,
   val organizationService: OrganizationService,
   val userPersistence: UserPersistence,
-  val permissionPersistence: PermissionPersistence,
   val permissionHandler: PermissionHandler,
   val trackingClient: TrackingClient,
 ) {
@@ -124,11 +120,11 @@ class UserInvitationHandler(
             requestBody.permissionType,
           )
 
-        else -> throw IllegalArgumentException("Unexpected scope type: " + requestBody.scopeType)
+        else -> throw IllegalArgumentException("Unexpected scope type: ${requestBody.scopeType}")
       }
     } catch (e: Exception) {
       // log the error, but don't throw an exception to prevent a user-facing error
-      log.error(e) { "${"Failed to track user invited"}" }
+      log.error(e) { "Failed to track user invited" }
     }
   }
 
@@ -144,19 +140,15 @@ class UserInvitationHandler(
       workspaceId,
       io.airbyte.config.ScopeType.WORKSPACE,
       USER_INVITED,
-      ImmutableMap
-        .builder<String, Any?>()
-        .put("email", email)
-        .put("inviter_user_email", inviterUserEmail)
-        .put("inviter_user_id", inviterUserId)
-        .put("role", permissionType)
-        .put("workspace_id", workspaceId)
-        .put("workspace_name", workspaceName)
-        .put(
-          "invited_from",
-          "unspecified",
-        ) // Note: currently we don't have a way to specify this, carryover from old cloud-only invite system
-        .build(),
+      mapOf(
+        "email" to email,
+        "inviter_user_email" to inviterUserEmail,
+        "inviter_user_id" to inviterUserId,
+        "role" to permissionType,
+        "workspace_id" to workspaceId,
+        "workspace_name" to workspaceName,
+        "invited_from" to "unspecified",
+      ),
     )
   }
 
@@ -213,22 +205,20 @@ class UserInvitationHandler(
     val userIdsWithEmail =
       userWithEmail
         .map { userInfo: User ->
-          java.util.Set.of(
-            userInfo.userId,
-          )
+          setOf(userInfo.userId)
         }.orElseGet { setOf() }
 
     log.info { "userIdsWithEmail: $userIdsWithEmail" }
 
     val existingOrgUserIds =
-      permissionPersistence
+      permissionHandler
         .listUsersInOrganization(orgId)
         .map { it.user.userId }
         .toSet()
 
     log.info { "existingOrgUserIds: $existingOrgUserIds" }
 
-    val intersection: Set<UUID> = Sets.intersection(userIdsWithEmail, existingOrgUserIds)
+    val intersection: Set<UUID> = userIdsWithEmail intersect existingOrgUserIds
 
     log.info { "intersection: $intersection" }
 
@@ -246,9 +236,9 @@ class UserInvitationHandler(
     existingUserId: UUID,
   ) {
     val permissionCreate =
-      PermissionCreate()
-        .userId(existingUserId)
-        .permissionType(req.permissionType)
+      Permission()
+        .withUserId(existingUserId)
+        .withPermissionType(Permission.PermissionType.valueOf(req.permissionType.name))
 
     when (req.scopeType) {
       ScopeType.ORGANIZATION -> permissionCreate.organizationId = req.scopeId
@@ -307,7 +297,7 @@ class UserInvitationHandler(
           .getOrganization(req.scopeId)
           .orElseThrow {
             ConfigNotFoundException(
-              ConfigSchema.ORGANIZATION,
+              ConfigNotFoundType.ORGANIZATION,
               req.scopeId,
             )
           }.name

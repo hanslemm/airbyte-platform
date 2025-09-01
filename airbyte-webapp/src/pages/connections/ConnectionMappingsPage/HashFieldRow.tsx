@@ -1,16 +1,16 @@
 import { useEffect, useMemo } from "react";
 import { Controller, FormProvider, useForm, useFormContext } from "react-hook-form";
 import { FormattedMessage } from "react-intl";
-import * as yup from "yup";
 
+import { hashingMapperConfiguration } from "components/connection/ConnectionForm/schemas/mapperSchema";
 import { FlexContainer } from "components/ui/Flex";
-import { Icon } from "components/ui/Icon";
 import { ListBox, ListBoxControlButtonProps } from "components/ui/ListBox";
 import { Text } from "components/ui/Text";
 
 import {
   HashingMapperConfiguration,
   HashingMapperConfigurationMethod,
+  MapperValidationErrorType,
   StreamMapperType,
 } from "core/api/types/AirbyteClient";
 
@@ -19,17 +19,9 @@ import { useMappingContext } from "./MappingContext";
 import { MappingRowContent, MappingRowItem } from "./MappingRow";
 import styles from "./MappingRow.module.scss";
 import { MappingTypeListBox } from "./MappingTypeListBox";
+import { MappingValidationErrorMessage } from "./MappingValidationErrorMessage";
 import { SelectTargetField } from "./SelectTargetField";
 import { StreamMapperWithId } from "./types";
-
-const hashingMapperConfigSchema = yup.object().shape({
-  targetField: yup.string().required("form.empty.error"),
-  method: yup
-    .mixed<HashingMapperConfigurationMethod>()
-    .oneOf(Object.values(HashingMapperConfigurationMethod))
-    .required("form.empty.error"),
-  fieldNameSuffix: yup.string().required("form.empty.error"),
-});
 
 export const HashFieldRow: React.FC<{
   mapping: StreamMapperWithId<HashingMapperConfiguration>;
@@ -49,7 +41,7 @@ export const HashFieldRow: React.FC<{
 
   const methods = useForm<HashingMapperConfiguration>({
     defaultValues,
-    resolver: autoSubmitResolver<HashingMapperConfiguration>(hashingMapperConfigSchema, (formValues) => {
+    resolver: autoSubmitResolver(hashingMapperConfiguration, (formValues) => {
       updateLocalMapping(streamDescriptorKey, mapping.id, { mapperConfiguration: formValues });
     }),
     mode: "onBlur",
@@ -60,8 +52,14 @@ export const HashFieldRow: React.FC<{
   }, [methods.trigger, streamDescriptorKey, updateLocalMapping, mapping.id]);
 
   useEffect(() => {
-    if (mapping.validationError && mapping.validationError.type === "FIELD_NOT_FOUND") {
-      methods.setError("targetField", { message: mapping.validationError.message });
+    if (
+      mapping.validationError &&
+      mapping.validationError.type === MapperValidationErrorType.FIELD_NOT_FOUND &&
+      "targetField" in methods.formState.touchedFields
+    ) {
+      methods.setError("targetField", {
+        message: "connections.mappings.error.FIELD_NOT_FOUND",
+      });
     } else {
       methods.clearErrors("targetField");
     }
@@ -97,11 +95,10 @@ export const HashFieldRow: React.FC<{
             <SelectHashingMethod disabled={isStreamValidating} />
           </MappingRowItem>
         </MappingRowContent>
-        {mapping.validationError && mapping.validationError.type !== "FIELD_NOT_FOUND" && (
-          <Text italicized color="red">
-            {mapping.validationError.message}
-          </Text>
-        )}
+        <MappingValidationErrorMessage<HashingMapperConfiguration>
+          validationError={mapping.validationError}
+          touchedFields={methods.formState.touchedFields}
+        />
       </form>
     </FormProvider>
   );
@@ -122,7 +119,6 @@ const SelectHashingMethodControlButton: React.FC<ListBoxControlButtonProps<Hashi
   return (
     <FlexContainer alignItems="center" gap="none">
       <Text color={isDisabled ? "grey300" : "darkBlue"}>{selectedOption.label}</Text>
-      <Icon type="caretDown" color="disabled" />
     </FlexContainer>
   );
 };
@@ -144,7 +140,7 @@ const SelectHashingMethod: React.FC<{ disabled: boolean }> = ({ disabled }) => {
       render={({ field }) => (
         <ListBox
           buttonClassName={styles.controlButton}
-          controlButton={SelectHashingMethodControlButton}
+          controlButtonContent={SelectHashingMethodControlButton}
           isDisabled={disabled}
           onSelect={(value) => {
             field.onChange(value);

@@ -6,13 +6,15 @@ package io.airbyte.server.apis.controllers
 
 import io.airbyte.api.generated.JobsApi
 import io.airbyte.api.model.generated.BooleanRead
-import io.airbyte.api.model.generated.CheckInput
 import io.airbyte.api.model.generated.ConnectionIdRequestBody
 import io.airbyte.api.model.generated.ConnectionJobRequestBody
 import io.airbyte.api.model.generated.DeleteStreamResetRecordsForJobRequest
+import io.airbyte.api.model.generated.GetWebhookConfigRequest
+import io.airbyte.api.model.generated.GetWebhookConfigResponse
 import io.airbyte.api.model.generated.InternalOperationResult
 import io.airbyte.api.model.generated.JobCreate
 import io.airbyte.api.model.generated.JobDebugInfoRead
+import io.airbyte.api.model.generated.JobExplainRead
 import io.airbyte.api.model.generated.JobFailureRequest
 import io.airbyte.api.model.generated.JobIdRequestBody
 import io.airbyte.api.model.generated.JobInfoLightRead
@@ -25,16 +27,21 @@ import io.airbyte.api.model.generated.JobSuccessWithAttemptNumberRequest
 import io.airbyte.api.model.generated.PersistCancelJobRequestBody
 import io.airbyte.api.model.generated.ReportJobStartRequest
 import io.airbyte.api.model.generated.SyncInput
-import io.airbyte.commons.auth.AuthRoleConstants
+import io.airbyte.api.problems.throwable.generated.ApiNotImplementedInOssProblem
 import io.airbyte.commons.auth.generated.Intent
 import io.airbyte.commons.auth.permissions.RequiresIntent
+import io.airbyte.commons.auth.roles.AuthRoleConstants
+import io.airbyte.commons.json.Jsons
 import io.airbyte.commons.server.handlers.JobHistoryHandler
 import io.airbyte.commons.server.handlers.JobInputHandler
 import io.airbyte.commons.server.handlers.JobsHandler
 import io.airbyte.commons.server.handlers.SchedulerHandler
 import io.airbyte.commons.server.scheduling.AirbyteTaskExecutors
 import io.airbyte.commons.temporal.StreamResetRecordsHelper
+import io.airbyte.metrics.lib.ApmTraceUtils
+import io.airbyte.metrics.lib.MetricTags
 import io.airbyte.server.apis.execute
+import io.airbyte.server.services.JobObservabilityService
 import io.micronaut.context.annotation.Context
 import io.micronaut.http.annotation.Body
 import io.micronaut.http.annotation.Controller
@@ -54,6 +61,7 @@ open class JobsApiController(
   private val jobInputHandler: JobInputHandler,
   private val jobsHandler: JobsHandler,
   private val streamResetRecordsHelper: StreamResetRecordsHelper,
+  private val jobObservabilityService: JobObservabilityService,
 ) : JobsApi {
   @Post("/cancel")
   @ExecuteOn(AirbyteTaskExecutors.SCHEDULER)
@@ -81,39 +89,60 @@ open class JobsApiController(
     }
   }
 
-  @Post("/get_check_input")
-  @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
+  @Post("/evaluate_outlier")
+  @Secured(AuthRoleConstants.ADMIN)
   @ExecuteOn(AirbyteTaskExecutors.IO)
-  override fun getCheckInput(
-    @Body checkInput: CheckInput?,
-  ): Any? = execute { jobInputHandler.getCheckJobInput(checkInput) }
+  override fun evaluateOutlier(jobIdRequestBody: JobIdRequestBody): InternalOperationResult? =
+    execute {
+      try {
+        jobObservabilityService.evaluateOutlier(jobId = jobIdRequestBody.id)
+        InternalOperationResult().succeeded(true)
+      } catch (t: Throwable) {
+        ApmTraceUtils.addTagsToTrace(mapOf(MetricTags.JOB_ID to jobIdRequestBody.id))
+        throw t
+      }
+    }
+
+  @Post("/finalize")
+  @Secured(AuthRoleConstants.ADMIN)
+  @ExecuteOn(AirbyteTaskExecutors.IO)
+  override fun finalizeJob(jobIdRequestBody: JobIdRequestBody): InternalOperationResult? =
+    execute {
+      try {
+        jobObservabilityService.finalizeStats(jobId = jobIdRequestBody.id)
+        InternalOperationResult().succeeded(true)
+      } catch (t: Throwable) {
+        ApmTraceUtils.addTagsToTrace(mapOf(MetricTags.JOB_ID to jobIdRequestBody.id))
+        throw t
+      }
+    }
 
   @Post("/get_debug_info")
   @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
   @ExecuteOn(AirbyteTaskExecutors.SCHEDULER)
   override fun getJobDebugInfo(
     @Body jobIdRequestBody: JobIdRequestBody,
-  ): JobDebugInfoRead? = execute { jobHistoryHandler.getJobDebugInfo(jobIdRequestBody) }
+  ): JobDebugInfoRead? = execute { jobHistoryHandler.getJobDebugInfo(jobIdRequestBody.id) }
 
   @Post("/get")
   @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun getJobInfo(
     @Body jobIdRequestBody: JobIdRequestBody,
-  ): JobInfoRead? = execute { jobHistoryHandler.getJobInfo(jobIdRequestBody) }
+  ): JobInfoRead? = execute { jobHistoryHandler.getJobInfo(jobIdRequestBody.id) }
 
   @Post("/get_without_logs")
   @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun getJobInfoWithoutLogs(
     @Body jobIdRequestBody: JobIdRequestBody,
-  ): JobInfoRead? = execute { jobHistoryHandler.getJobInfoWithoutLogs(jobIdRequestBody) }
+  ): JobInfoRead? = execute { jobHistoryHandler.getJobInfoWithoutLogs(jobIdRequestBody.id) }
 
   @Post("/get_input")
-  @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
+  @Secured(AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER, AuthRoleConstants.DATAPLANE)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun getJobInput(
-    @Body syncInput: SyncInput?,
+    @Body syncInput: SyncInput,
   ): Any? = execute { jobInputHandler.getJobInput(syncInput) }
 
   @Post("/get_light")
@@ -124,7 +153,7 @@ open class JobsApiController(
   ): JobInfoLightRead? = execute { jobHistoryHandler.getJobInfoLight(jobIdRequestBody) }
 
   @Post("/get_last_replication_job")
-  @Secured(AuthRoleConstants.READER, AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
+  @Secured(AuthRoleConstants.READER, AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER, AuthRoleConstants.DATAPLANE)
   @ExecuteOn(AirbyteTaskExecutors.IO)
   override fun getLastReplicationJob(
     @Body connectionIdRequestBody: ConnectionIdRequestBody,
@@ -136,6 +165,16 @@ open class JobsApiController(
   override fun getLastReplicationJobWithCancel(
     @Body connectionIdRequestBody: ConnectionIdRequestBody,
   ): JobOptionalRead? = execute { jobHistoryHandler.getLastReplicationJobWithCancel(connectionIdRequestBody) }
+
+  @Post("/getWebhookConfig")
+  @Secured(AuthRoleConstants.READER, AuthRoleConstants.WORKSPACE_READER, AuthRoleConstants.ORGANIZATION_READER)
+  @ExecuteOn(AirbyteTaskExecutors.IO)
+  override fun getWebhookConfig(
+    @Body getWebhookConfigRequest: GetWebhookConfigRequest,
+  ): GetWebhookConfigResponse? =
+    execute {
+      GetWebhookConfigResponse().value(Jsons.serialize(jobInputHandler.getJobWebhookConfig(getWebhookConfigRequest.jobId)))
+    }
 
   @Post("/job_failure")
   @Secured(AuthRoleConstants.ADMIN)
@@ -190,6 +229,11 @@ open class JobsApiController(
         requestBody.jobId,
       )
     }
+
+  @Post("/explain")
+  @ExecuteOn(AirbyteTaskExecutors.IO)
+  @RequiresIntent(Intent.ViewConnection)
+  override fun explainJob(jobIdRequestBody: JobIdRequestBody): JobExplainRead = throw ApiNotImplementedInOssProblem()
 
   @Post("/persist_cancellation")
   @Secured(AuthRoleConstants.ADMIN)

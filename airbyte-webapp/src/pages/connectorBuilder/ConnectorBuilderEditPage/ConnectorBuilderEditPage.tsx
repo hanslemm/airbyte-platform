@@ -1,20 +1,42 @@
-import { yupResolver } from "@hookform/resolvers/yup";
 import classnames from "classnames";
-import React, { useMemo, useRef } from "react";
-import { FormProvider, useForm } from "react-hook-form";
-import { AnyObjectSchema } from "yup";
+import React, { useMemo } from "react";
+import { DefaultValues, useFormContext } from "react-hook-form";
+import { useIntl } from "react-intl";
+import { z } from "zod";
 
 import { Builder } from "components/connectorBuilder/Builder/Builder";
+import {
+  RequestBodyGraphQL,
+  RequestOptionFieldPath,
+  RequestOptionFieldName,
+  RequestOptionInjectSelector,
+  DeclarativeOAuthWithClientId,
+  GrantTypeSelector,
+  JinjaBuilderField,
+  BackoffStrategies,
+  CursorField,
+  CursorDatetimeFormats,
+} from "components/connectorBuilder/Builder/overrides";
+import { DEFAULT_JSON_MANIFEST_VALUES_WITH_STREAM } from "components/connectorBuilder/constants";
 import { MenuBar } from "components/connectorBuilder/MenuBar";
 import { StreamTestingPanel } from "components/connectorBuilder/StreamTestingPanel";
 import { BuilderState } from "components/connectorBuilder/types";
-import { useBuilderValidationSchema } from "components/connectorBuilder/useBuilderValidationSchema";
 import { useBuilderWatch } from "components/connectorBuilder/useBuilderWatch";
 import { YamlManifestEditor } from "components/connectorBuilder/YamlEditor";
+import { SchemaForm } from "components/forms/SchemaForm/SchemaForm";
 import { HeadTitle } from "components/HeadTitle";
 import { FlexContainer } from "components/ui/Flex";
 import { ResizablePanels } from "components/ui/ResizablePanels";
 
+import {
+  ConnectorBuilderResolveProvider,
+  useConnectorBuilderResolve,
+} from "core/services/connectorBuilder/ConnectorBuilderResolveContext";
+import {
+  ConnectorBuilderSchemaProvider,
+  useConnectorBuilderSchema,
+} from "core/services/connectorBuilder/ConnectorBuilderSchemaContext";
+import { useExperiment } from "hooks/services/Experiment";
 import {
   ConnectorBuilderLocalStorageProvider,
   useConnectorBuilderLocalStorage,
@@ -24,116 +46,188 @@ import {
   ConnectorBuilderFormStateProvider,
   ConnectorBuilderFormManagementStateProvider,
   ConnectorBuilderMainRHFContext,
-  useInitializedBuilderProject,
-  useConnectorBuilderFormManagementState,
 } from "services/connectorBuilder/ConnectorBuilderStateService";
 
 import styles from "./ConnectorBuilderEditPage.module.scss";
 
 const ConnectorBuilderEditPageInner: React.FC = React.memo(() => {
+  const { formatMessage } = useIntl();
   const {
     projectId,
-    initialFormValues,
-    failedInitialFormValueConversion,
-    initialYaml,
     builderProject: {
       builderProject: { name, componentsFileContent },
       testingValues: initialTestingValues,
     },
-  } = useInitializedBuilderProject();
+    initialYaml,
+    initialResolvedManifest,
+  } = useConnectorBuilderResolve();
   const { getStoredMode } = useConnectorBuilderLocalStorage();
-  const values = {
-    mode: failedInitialFormValueConversion ? "yaml" : getStoredMode(projectId),
-    formValues: initialFormValues,
+  const areDynamicStreamsEnabled = useExperiment("connectorBuilder.dynamicStreams");
+
+  const dynamicStreams = initialResolvedManifest?.dynamic_streams;
+  const streams = initialResolvedManifest?.streams;
+
+  const hasDynamicStreams = Array.isArray(dynamicStreams) && dynamicStreams.length > 0;
+  const hasStreams = Array.isArray(streams) && streams.length > 0;
+  const initialTestStreamId =
+    !hasStreams && areDynamicStreamsEnabled && hasDynamicStreams
+      ? { type: "dynamic_stream" as const, index: 0 }
+      : { type: "stream" as const, index: 0 };
+
+  const initialView =
+    initialTestStreamId.type === "dynamic_stream"
+      ? { type: "dynamic_stream" as const, index: 0 }
+      : hasStreams
+      ? { type: "stream" as const, index: 0 }
+      : { type: "global" as const };
+
+  const values: BuilderState = {
+    mode: initialResolvedManifest !== null ? getStoredMode(projectId) : "yaml",
     yaml: initialYaml,
     customComponentsCode: componentsFileContent,
     name,
-    view: "global" as const,
-    testStreamIndex: 0,
-    testingValues: initialTestingValues,
+    view: initialView,
+    streamTab: "requester" as const,
+    testStreamId: initialTestStreamId,
+    testingValues: initialTestingValues ?? {},
+    manifest: initialResolvedManifest ?? DEFAULT_JSON_MANIFEST_VALUES_WITH_STREAM,
+    generatedStreams: {},
   };
-  const initialValues = useRef(values);
-  initialValues.current = values;
 
-  return <BaseForm defaultValues={initialValues} />;
+  const { builderStateSchema } = useConnectorBuilderSchema();
+
+  return (
+    <SchemaForm
+      schema={builderStateSchema}
+      initialValues={values as unknown as DefaultValues<BuilderState>}
+      formClassName={styles.form}
+      refTargetPath="manifest.definitions.linked"
+      refBasePath="manifest"
+      disableFormControlsUnderPath="generatedStreams"
+      onlyShowErrorIfTouched
+      overrideByObjectField={{
+        RequestBodyGraphQL: {
+          fieldOverrides: {
+            value: (path) => <RequestBodyGraphQL path={path} key={path} />,
+          },
+        },
+        RequestOption: {
+          fieldOverrides: {
+            field_name: (path) => <RequestOptionFieldName path={path} key={path} />,
+            field_path: (path) => <RequestOptionFieldPath path={path} key={path} />,
+            inject_into: (path) => <RequestOptionInjectSelector path={path} key={path} />,
+          },
+          validate: z
+            .object({
+              field_name: z.string().trim().optional(),
+              field_path: z.array(z.string()).optional(),
+              inject_into: z.string(),
+            })
+            .superRefine((val, ctx) => {
+              if (val.inject_into !== "body_json" && !val.field_name) {
+                ctx.addIssue({
+                  code: z.ZodIssueCode.custom,
+                  message: formatMessage({ id: "form.empty.error" }),
+                  path: ["field_name"],
+                });
+                return false;
+              } else if (val.inject_into === "body_json" && (!val.field_path || val.field_path?.length === 0)) {
+                ctx.addIssue({
+                  code: z.ZodIssueCode.custom,
+                  message: formatMessage({ id: "form.empty.error" }),
+                  path: ["field_path"],
+                });
+                return false;
+              }
+              return true;
+            }),
+        },
+        OAuthAuthenticator: {
+          fieldOverrides: {
+            client_id: (path) => <DeclarativeOAuthWithClientId clientIdPath={path} key={path} />,
+            grant_type: (path) => <GrantTypeSelector path={path} key={path} />,
+          },
+        },
+        DefaultErrorHandler: {
+          fieldOverrides: {
+            backoff_strategies: (path) => <BackoffStrategies path={path} key={path} />,
+          },
+        },
+        DatetimeBasedCursor: {
+          fieldOverrides: {
+            cursor_field: (path) => <CursorField path={path} key={path} />,
+            cursor_datetime_formats: (path) => <CursorDatetimeFormats path={path} key={path} />,
+          },
+        },
+      }}
+      overrideByFieldSchema={[
+        {
+          shouldOverride: (schema) => schema.type === "string" && !!schema.interpolation_context,
+          renderOverride: (controlProps) => <JinjaBuilderField {...controlProps} key={controlProps.name} />,
+        },
+      ]}
+    >
+      <BaseForm />
+    </SchemaForm>
+  );
 });
 ConnectorBuilderEditPageInner.displayName = "ConnectorBuilderEditPageInner";
 
 export const ConnectorBuilderEditPage: React.FC = () => (
+  // Handles the state of modals being open, e.g. testing values input and test read settings
   <ConnectorBuilderFormManagementStateProvider>
+    {/* Handles local storage flags specific to the builder */}
     <ConnectorBuilderLocalStorageProvider>
-      <ConnectorBuilderEditPageInner />
+      {/* Handles calls to resolve the manifest, so that resolve state is shared across the app */}
+      <ConnectorBuilderResolveProvider>
+        {/* Contains the schema for the Builder form, so that it can be updated when user inputs are modified */}
+        <ConnectorBuilderSchemaProvider>
+          <ConnectorBuilderEditPageInner />
+        </ConnectorBuilderSchemaProvider>
+      </ConnectorBuilderResolveProvider>
     </ConnectorBuilderLocalStorageProvider>
   </ConnectorBuilderFormManagementStateProvider>
 );
 
-const BaseForm = React.memo(({ defaultValues }: { defaultValues: React.MutableRefObject<BuilderState> }) => {
-  const { builderStateValidationSchema } = useBuilderValidationSchema();
-
-  // if this component re-renders, everything subscribed to rhf rerenders because the context object is a new one
-  // Do prevent this, the hook is placed in its own memoized component which only re-renders when necessary
-  const methods = useForm({
-    defaultValues: defaultValues.current,
-    mode: "onChange",
-    resolver: yupResolver<AnyObjectSchema>(builderStateValidationSchema),
-  });
-
+const BaseForm = () => {
+  const methods = useFormContext<BuilderState>();
   return (
-    <FormProvider {...methods}>
-      <ConnectorBuilderMainRHFContext.Provider value={methods}>
-        <form
-          className={styles.form}
-          onSubmit={(e) => {
-            // prevent form submission
-            e.preventDefault();
-          }}
-        >
-          <ConnectorBuilderFormStateProvider>
-            <ConnectorBuilderTestReadProvider>
-              <HeadTitle titles={[{ id: "connectorBuilder.title" }]} />
-              <FlexContainer direction="column" gap="none" className={styles.container}>
-                <MenuBar />
-                <Panels />
-              </FlexContainer>
-            </ConnectorBuilderTestReadProvider>
-          </ConnectorBuilderFormStateProvider>
-        </form>
-      </ConnectorBuilderMainRHFContext.Provider>
-    </FormProvider>
+    <ConnectorBuilderMainRHFContext.Provider value={methods}>
+      {/* The main state context for the Builder */}
+      <ConnectorBuilderFormStateProvider>
+        {/* Handles the state of the test reads for streams */}
+        <ConnectorBuilderTestReadProvider>
+          <HeadTitle titles={[{ id: "connectorBuilder.title" }]} />
+          <FlexContainer direction="column" gap="none" className={styles.container}>
+            <MenuBar />
+            <Panels />
+          </FlexContainer>
+        </ConnectorBuilderTestReadProvider>
+      </ConnectorBuilderFormStateProvider>
+    </ConnectorBuilderMainRHFContext.Provider>
   );
-});
-BaseForm.displayName = "BaseForm";
+};
 
 const Panels = React.memo(() => {
-  const formValues = useBuilderWatch("formValues");
   const mode = useBuilderWatch("mode");
-  const { stateKey } = useConnectorBuilderFormManagementState();
+  const testStreamId = useBuilderWatch("testStreamId");
 
   return useMemo(
     () => (
       <ResizablePanels
         // key is used to force re-mount of the form when a different state version is loaded so the react-hook-form / YAML editor state is re-initialized with the new values
-        key={stateKey}
         className={classnames(styles.panelsContainer, {
           [styles.gradientBg]: mode === "yaml",
           [styles.solidBg]: mode === "ui",
         })}
         panels={[
           {
-            children: (
-              <>
-                {mode === "yaml" ? (
-                  <YamlManifestEditor />
-                ) : (
-                  <Builder hasMultipleStreams={formValues.streams.length > 1} />
-                )}
-              </>
-            ),
+            children: mode === "yaml" ? <YamlManifestEditor /> : <Builder />,
             className: styles.leftPanel,
             minWidth: 350,
           },
           {
-            children: <StreamTestingPanel />,
+            children: <StreamTestingPanel key={JSON.stringify(testStreamId)} />,
             className: styles.rightPanel,
             flex: 0.33,
             minWidth: 250,
@@ -141,7 +235,7 @@ const Panels = React.memo(() => {
         ]}
       />
     ),
-    [formValues.streams.length, mode, stateKey]
+    [mode, testStreamId]
   );
 });
 Panels.displayName = "Panels";

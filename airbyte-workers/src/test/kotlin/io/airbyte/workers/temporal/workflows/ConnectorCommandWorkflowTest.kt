@@ -14,7 +14,10 @@ import io.airbyte.micronaut.temporal.TemporalProxyHelper
 import io.airbyte.persistence.job.models.IntegrationLauncherConfig
 import io.airbyte.persistence.job.models.JobRunConfig
 import io.airbyte.workers.commands.CheckCommand
+import io.airbyte.workers.commands.CheckCommandV2
 import io.airbyte.workers.commands.DiscoverCommand
+import io.airbyte.workers.commands.DiscoverCommandV2
+import io.airbyte.workers.commands.ReplicationCommand
 import io.airbyte.workers.commands.SpecCommand
 import io.micronaut.context.BeanRegistration
 import io.mockk.every
@@ -30,6 +33,7 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
 
@@ -38,8 +42,11 @@ class ConnectorCommandWorkflowTest {
     const val QUEUE_NAME = "connector_command_queue"
 
     lateinit var checkCommand: CheckCommand
+    lateinit var checkCommandThroughApi: CheckCommandV2
     lateinit var discoverCommand: DiscoverCommand
+    lateinit var discoverCommandV2: DiscoverCommandV2
     lateinit var specCommand: SpecCommand
+    lateinit var replicationCommand: ReplicationCommand
     lateinit var activityExecutionContextProvider: ActivityExecutionContextProvider
     lateinit var connectorCommandActivity: ConnectorCommandActivity
 
@@ -75,14 +82,20 @@ class ConnectorCommandWorkflowTest {
       client = testEnv.workflowClient
 
       checkCommand = mockk()
+      checkCommandThroughApi = mockk()
       discoverCommand = mockk()
+      discoverCommandV2 = mockk()
       specCommand = mockk()
+      replicationCommand = mockk()
       activityExecutionContextProvider = ActivityExecutionContextProvider()
       connectorCommandActivity =
         ConnectorCommandActivityImpl(
           checkCommand,
+          checkCommandThroughApi,
           discoverCommand,
+          discoverCommandV2,
           specCommand,
+          replicationCommand,
           activityExecutionContextProvider,
           mockk(relaxed = true),
         )
@@ -106,6 +119,7 @@ class ConnectorCommandWorkflowTest {
     every { checkCommand.start(any(), any()) } returns workloadId
     every { checkCommand.isTerminal(workloadId) } returns false andThen false andThen true
     every { checkCommand.getOutput(workloadId) } returns output
+    every { checkCommand.getAwaitDuration() } returns 1.minutes
 
     val input =
       CheckCommandInput(

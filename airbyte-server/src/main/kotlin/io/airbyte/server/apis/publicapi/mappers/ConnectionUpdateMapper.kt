@@ -10,7 +10,6 @@ import io.airbyte.api.model.generated.ConnectionScheduleDataCron
 import io.airbyte.api.model.generated.ConnectionScheduleType
 import io.airbyte.api.model.generated.ConnectionStatus
 import io.airbyte.api.model.generated.ConnectionUpdate
-import io.airbyte.api.model.generated.Geography
 import io.airbyte.publicApi.server.generated.models.ConnectionPatchRequest
 import io.airbyte.publicApi.server.generated.models.ScheduleTypeEnum
 import io.airbyte.server.apis.publicapi.helpers.ConnectionHelper
@@ -53,11 +52,6 @@ object ConnectionUpdateMapper {
     }
     if (connectionPatchRequest.prefix != null) {
       connectionUpdateOss.prefix = connectionPatchRequest.prefix
-    }
-
-    // set geography
-    if (connectionPatchRequest.dataResidency != null) {
-      connectionUpdateOss.geography = Geography.fromValue(connectionPatchRequest.dataResidency.toString())
     }
 
     // set schedule

@@ -40,11 +40,15 @@ dependencies {
   implementation(libs.jakarta.validation.api)
   implementation(libs.jackson.datatype)
   implementation(libs.jackson.databind)
+  implementation(libs.micronaut.security.oauth2)
+  implementation(libs.micronaut.security)
+  implementation(libs.micronaut.security.jwt)
   implementation(libs.openapi.jackson.databind.nullable)
   implementation(libs.reactor.core)
   implementation(libs.slf4j.api)
   implementation(libs.swagger.annotations)
   implementation(project(":oss:airbyte-commons"))
+  implementation(project(":oss:airbyte-commons-auth"))
 
   compileOnly(libs.v3.swagger.annotations)
 
@@ -54,6 +58,7 @@ dependencies {
   testImplementation(libs.assertj.core)
   testImplementation(libs.junit.pioneer)
   testImplementation(libs.mockk)
+  testImplementation(libs.mockwebserver)
   testImplementation(libs.kotlin.test.runner.junit5)
 }
 
@@ -63,13 +68,13 @@ val genApiServer =
   tasks.register<GenerateTask>("generateApiServer") {
     val serverOutputDir = "${getLayout().buildDirectory.get()}/generated/api/server"
 
-    inputs.file(specFile)
+    inputs.file(specFile).withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.dir(serverOutputDir)
 
     generatorName = "jaxrs-spec"
     inputSpec = specFile
     outputDir = serverOutputDir
-    templateDir = "$projectDir/src/main/resources/templates/jaxrs-spec"
+    templateDir.set("$projectDir/src/main/resources/templates/jaxrs-spec")
 
     apiPackage = "io.airbyte.api.generated"
     invokerPackage = "io.airbyte.api.invoker.generated"
@@ -90,6 +95,7 @@ val genApiServer =
         "SecretPersistenceConfigurationJson" to "com.fasterxml.jackson.databind.JsonNode",
         "ConnectorBuilderProjectTestingValues" to "com.fasterxml.jackson.databind.JsonNode",
         "BillingEvent" to "com.fasterxml.jackson.databind.JsonNode",
+        "ConnectorIPCOptions" to "com.fasterxml.jackson.databind.JsonNode",
       )
 
     generateApiDocumentation = false
@@ -99,6 +105,7 @@ val genApiServer =
         "dateLibrary" to "java8",
         "generatePom" to "false",
         "interfaceOnly" to "true",
+        "hideGenerationTimestamp" to "true",
             /*
             JAX-RS generator does not respect nullable properties defined in the OpenApi Spec.
             It means that if a field is not nullable but not set it is still returning a null value for this field in the serialized json.
@@ -123,13 +130,13 @@ val genApiServer2 =
   tasks.register<GenerateTask>("genApiServer2") {
     val serverOutputDir = "${getLayout().buildDirectory.get()}/generated/api/server2"
 
-    inputs.file(specFile)
+    inputs.file(specFile).withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.dir(serverOutputDir)
 
     generatorName = "kotlin-server"
     inputSpec = specFile
     outputDir = serverOutputDir
-    templateDir = "$projectDir/src/main/resources/templates/kotlin-server"
+    templateDir.set("$projectDir/src/main/resources/templates/kotlin-server")
 
     packageName = "io.airbyte.api.server.generated"
 
@@ -164,6 +171,7 @@ val genApiServer2 =
         "SecretPersistenceConfigurationJson" to "com.fasterxml.jackson.databind.JsonNode",
         "ConnectorBuilderProjectTestingValues" to "com.fasterxml.jackson.databind.JsonNode",
         "BillingEvent" to "com.fasterxml.jackson.databind.JsonNode",
+        "ConnectorIPCOptions" to "com.fasterxml.jackson.databind.JsonNode",
       )
   }
 
@@ -171,7 +179,7 @@ val genApiClient =
   tasks.register<GenerateTask>("genApiClient") {
     val clientOutputDir = "${getLayout().buildDirectory.get()}/generated/api/client"
 
-    inputs.file(specFile)
+    inputs.file(specFile).withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.dir(clientOutputDir)
 
     generatorName = "kotlin"
@@ -197,6 +205,7 @@ val genApiClient =
         "SecretPersistenceConfigurationJson" to "com.fasterxml.jackson.databind.JsonNode",
         "ConnectorBuilderProjectTestingValues" to "com.fasterxml.jackson.databind.JsonNode",
         "BillingEvent" to "com.fasterxml.jackson.databind.JsonNode",
+        "ConnectorIPCOptions" to "com.fasterxml.jackson.databind.JsonNode",
       )
 
     generateApiDocumentation = false
@@ -242,6 +251,7 @@ val genApiDocs =
         "MapperConfiguration" to "com.fasterxml.jackson.databind.JsonNode",
         "ConnectorBuilderProjectTestingValues" to "com.fasterxml.jackson.databind.JsonNode",
         "BillingEvent" to "com.fasterxml.jackson.databind.JsonNode",
+        "ConnectorIPCOptions" to "com.fasterxml.jackson.databind.JsonNode",
       )
 
     generateApiDocumentation = false

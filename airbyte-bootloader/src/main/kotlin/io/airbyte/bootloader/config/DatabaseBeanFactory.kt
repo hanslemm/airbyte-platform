@@ -4,13 +4,13 @@
 
 package io.airbyte.bootloader.config
 
-import io.airbyte.commons.resources.MoreResources
+import io.airbyte.commons.resources.Resources
 import io.airbyte.config.persistence.OrganizationPersistence
 import io.airbyte.config.persistence.UserPersistence
 import io.airbyte.config.persistence.WorkspacePersistence
 import io.airbyte.data.services.shared.DataSourceUnwrapper
 import io.airbyte.db.Database
-import io.airbyte.db.check.impl.JobsDatabaseAvailabilityCheck
+import io.airbyte.db.check.JobsDatabaseAvailabilityCheck
 import io.airbyte.db.factory.DatabaseCheckFactory
 import io.airbyte.db.init.DatabaseInitializer
 import io.airbyte.db.instance.DatabaseConstants
@@ -125,7 +125,7 @@ class DatabaseBeanFactory {
     DatabaseCheckFactory.createConfigsDatabaseInitializer(
       DataSourceUnwrapper.unwrapContext(configsDslContext),
       configsDatabaseInitializationTimeoutMs,
-      MoreResources.readResource(DatabaseConstants.CONFIGS_INITIAL_SCHEMA_PATH),
+      Resources.read(DatabaseConstants.CONFIGS_INITIAL_SCHEMA_PATH),
     )
 
   @Singleton
@@ -137,7 +137,7 @@ class DatabaseBeanFactory {
     DatabaseCheckFactory.createJobsDatabaseInitializer(
       DataSourceUnwrapper.unwrapContext(jobsDslContext),
       jobsDatabaseInitializationTimeoutMs,
-      MoreResources.readResource(DatabaseConstants.JOBS_INITIAL_SCHEMA_PATH),
+      Resources.read(DatabaseConstants.JOBS_INITIAL_SCHEMA_PATH),
     )
 
   @Singleton
@@ -150,15 +150,15 @@ class DatabaseBeanFactory {
   @Singleton
   @Named("configsDatabaseMigrator")
   fun configsDatabaseMigrator(
-    @Named("configDatabase") configDatabase: Database?,
-    @Named("configFlyway") configFlyway: Flyway?,
+    @Named("configDatabase") configDatabase: Database,
+    @Named("configFlyway") configFlyway: Flyway,
   ): DatabaseMigrator = ConfigsDatabaseMigrator(configDatabase, configFlyway)
 
   @Singleton
   @Named("jobsDatabaseMigrator")
   fun jobsDatabaseMigrator(
-    @Named("jobsDatabase") jobsDatabase: Database?,
-    @Named("jobsFlyway") jobsFlyway: Flyway?,
+    @Named("jobsDatabase") jobsDatabase: Database,
+    @Named("jobsFlyway") jobsFlyway: Flyway,
   ): DatabaseMigrator = JobsDatabaseMigrator(jobsDatabase, jobsFlyway)
 
   @Singleton

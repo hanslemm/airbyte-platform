@@ -10,6 +10,7 @@ import io.airbyte.commons.version.AirbyteProtocolVersionRange
 import io.airbyte.config.ActorDefinitionBreakingChange
 import io.airbyte.config.ActorDefinitionVersion
 import io.airbyte.config.ActorType
+import io.airbyte.config.Configs
 import io.airbyte.config.Configs.SeedDefinitionsProviderType
 import io.airbyte.config.ConnectorEnumRolloutState
 import io.airbyte.config.ConnectorRegistryDestinationDefinition
@@ -32,11 +33,10 @@ import io.airbyte.metrics.MetricClient
 import io.airbyte.metrics.OssMetricsRegistry
 import io.airbyte.persistence.job.JobPersistence
 import io.airbyte.validation.json.JsonValidationException
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micronaut.context.annotation.Requires
 import jakarta.inject.Named
 import jakarta.inject.Singleton
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.util.Optional
 import java.util.UUID
@@ -61,6 +61,7 @@ class ApplyDefinitionsHelper(
   private val actorDefinitionVersionResolver: ActorDefinitionVersionResolver,
   private val airbyteCompatibleConnectorsValidator: AirbyteCompatibleConnectorsValidator,
   private val connectorRolloutService: ConnectorRolloutService,
+  private val airbyteEdition: Configs.AirbyteEdition,
 ) {
   private var newConnectorCount = 0
   private var changedConnectorCount = 0
@@ -84,10 +85,10 @@ class ApplyDefinitionsHelper(
     updateAll: Boolean = false,
     reImportVersionInUse: Boolean = false,
   ) {
-    val latestSourceDefinitions = definitionsProvider.sourceDefinitions
-    val latestDestinationDefinitions = definitionsProvider.destinationDefinitions
+    val latestSourceDefinitions = definitionsProvider.getSourceDefinitions()
+    val latestDestinationDefinitions = definitionsProvider.getDestinationDefinitions()
 
-    val currentProtocolRange = jobPersistence.currentProtocolVersionRange
+    val currentProtocolRange = jobPersistence.getCurrentProtocolVersionRange()
     val protocolCompatibleSourceDefinitions =
       filterOutIncompatibleSourceDefs(currentProtocolRange, latestSourceDefinitions)
     val protocolCompatibleDestinationDefinitions =
@@ -98,8 +99,8 @@ class ApplyDefinitionsHelper(
     val airbyteCompatibleDestinationDefinitions =
       filterOutIncompatibleDestinationDefsWithCurrentAirbyteVersion(protocolCompatibleDestinationDefinitions)
     val actorDefinitionIdsToDefaultVersionsMap =
-      actorDefinitionService.actorDefinitionIdsToDefaultVersionsMap
-    val actorDefinitionIdsInUse = actorDefinitionService.actorDefinitionIdsInUse
+      actorDefinitionService.getActorDefinitionIdsToDefaultVersionsMap()
+    val actorDefinitionIdsInUse = actorDefinitionService.getActorDefinitionIdsInUse()
 
     newConnectorCount = 0
     changedConnectorCount = 0
@@ -205,6 +206,9 @@ class ApplyDefinitionsHelper(
 
   @VisibleForTesting
   internal fun <T> applyReleaseCandidates(rcDefinitions: List<T>) {
+    if (airbyteEdition != Configs.AirbyteEdition.CLOUD) {
+      return
+    }
     for (rcDef in rcDefinitions) {
       val rcAdv =
         when (rcDef) {
@@ -226,8 +230,8 @@ class ApplyDefinitionsHelper(
       try {
         val connectorRollout =
           when (rcDef) {
-            is ConnectorRegistrySourceDefinition -> ConnectorRegistryConverters.toConnectorRollout(rcDef, insertedAdv, initialAdv.getOrNull())
-            is ConnectorRegistryDestinationDefinition -> ConnectorRegistryConverters.toConnectorRollout(rcDef, insertedAdv, initialAdv.getOrNull())
+            is ConnectorRegistrySourceDefinition -> ConnectorRegistryConverters.toConnectorRollout(rcDef, insertedAdv, initialAdv.orElseThrow())
+            is ConnectorRegistryDestinationDefinition -> ConnectorRegistryConverters.toConnectorRollout(rcDef, insertedAdv, initialAdv.orElseThrow())
             else -> throw IllegalArgumentException("Unsupported type: ${rcDef!!::class.java}")
           }
         val existingRollout =
@@ -469,6 +473,6 @@ class ApplyDefinitionsHelper(
   }
 
   companion object {
-    private val log: Logger = LoggerFactory.getLogger(ApplyDefinitionsHelper::class.java)
+    private val log = KotlinLogging.logger {}
   }
 }

@@ -29,10 +29,11 @@ micronaut:
   executors:
     kube-client:
       type: cached
-      n-threads: ${WORKLOAD_LAUNCHER_PARALLELISM:10}
+      n-threads: ${KUBERNETES_CLIENT_MAX_IDLE_CONNECTIONS:10}
       core-pool-size: 0
-
 airbyte:
+  airbyte-url: ${AIRBYTE_URL:}
+  license-key: ${AIRBYTE_LICENSE_KEY:empty}
   pod-sweeper:
     # Time-to-live (in minutes) for running pods. Empty string (mapped to null) by default,
     # meaning running pods are preserved indefinitely.
@@ -53,14 +54,29 @@ airbyte:
   container:
     rootless-workload: ${ROOTLESS_WORKLOAD:false}
   control-plane-auth-endpoint: ${CONTROL_PLANE_AUTH_ENDPOINT:}
-  data-plane-id: ${DATA_PLANE_ID}
-  data-plane-name: ${DATA_PLANE_NAME:default-data-plane}
+  data-plane-credentials:
+    client-id-secret-key: ${DATAPLANE_CLIENT_ID_SECRET_KEY}
+    client-id-secret-name: ${DATAPLANE_CLIENT_ID_SECRET_NAME}
+    client-secret-secret-key: ${DATAPLANE_CLIENT_SECRET_SECRET_KEY}
+    client-secret-secret-name: ${DATAPLANE_CLIENT_SECRET_SECRET_NAME}
   edition: ${AIRBYTE_EDITION:COMMUNITY}
   feature-flag:
     client: ${FEATURE_FLAG_CLIENT:}
     path: ${FEATURE_FLAG_PATH:/flags}
     api-key: ${LAUNCHDARKLY_KEY:}
     base-url: ${FEATURE_FLAG_BASEURL:}
+  internal-api:
+    base-path: ${INTERNAL_API_HOST}/api
+    connect-timeout-seconds: ${AIRBYTE_API_CONNECT_TIMEOUT_SECONDS:30}
+    read-timeout-seconds: ${AIRBYTE_API_READ_TIMEOUT_SECONDS:600}
+    retries:
+      delay-seconds: ${AIRBYTE_API_RETRY_DELAY_SECONDS:2}
+      max: ${AIRBYTE_API_MAX_RETRIES:5}
+    auth:
+      type: DATAPLANE_ACCESS_TOKEN
+      token-endpoint: ${CONTROL_PLANE_TOKEN_ENDPOINT}
+      client-id: ${DATAPLANE_CLIENT_ID}
+      client-secret: ${DATAPLANE_CLIENT_SECRET}
   kubernetes:
     client:
       call-timeout-sec: ${KUBERNETES_CLIENT_CALL_TIMEOUT_SECONDS:30}
@@ -79,26 +95,27 @@ airbyte:
     s3-path-style-access: ${S3_PATH_STYLE_ACCESS:}
   workload-api:
     base-path: ${WORKLOAD_API_HOST:}
-    bearer-token: ${WORKLOAD_API_BEARER_TOKEN:}
-    bearer-token-secret-key: ${WORKLOAD_API_BEARER_TOKEN_SECRET_KEY:}
-    bearer-token-secret-name: ${WORKLOAD_API_BEARER_TOKEN_SECRET_NAME:}
     connect-timeout-seconds: ${WORKLOAD_API_CONNECT_TIMEOUT_SECONDS:30}
     read-timeout-seconds: ${WORKLOAD_API_READ_TIMEOUT_SECONDS:300}
     retries:
       delay-seconds: ${WORKLOAD_API_RETRY_DELAY_SECONDS:2}
       max: ${WORKLOAD_API_MAX_RETRIES:5}
   workload-launcher:
-    geography: ${WORKLOAD_LAUNCHER_GEOGRAPHY:auto}
+    heartbeat-rate: PT30S
     workload-start-timeout: ${WORKLOAD_LAUNCHER_WORKLOAD_START_TIMEOUT:PT5H}
-    parallelism-max-surge: ${WORKLOAD_PARALLELISM_MAX_SURGE:10}
-    temporal:
-      default-queue:
-        parallelism: ${WORKLOAD_LAUNCHER_PARALLELISM:10}
-        workflow-parallelism: ${WORKLOAD_LAUNCHER_WORKFLOW_PARALLELISM:10}
-      high-priority-queue:
-        parallelism: ${WORKLOAD_LAUNCHER_PARALLELISM:10}
-        workflow-parallelism: ${WORKLOAD_LAUNCHER_WORKFLOW_PARALLELISM:10}
+    parallelism:
+      default-queue: ${WORKLOAD_LAUNCHER_PARALLELISM:10}
+      high-priority-queue: ${WORKLOAD_LAUNCHER_PARALLELISM:10}
+      max-surge: ${WORKLOAD_PARALLELISM_MAX_SURGE:10}
     network-policy-introspection: false
+    consumer:
+      queue-task-cap: ${WORKLOAD_CONSUMER_QUEUE_TASK_CAP:5}
+      default-queue:
+        poll-interval-seconds: ${WORKLOAD_DEFAULT_PRIO_POLL_FREQUENCY:1}
+        poll-size-items: ${WORKLOAD_DEFAULT_PRIO_POLL_SIZE:10}
+      high-priority-queue:
+        poll-interval-seconds: ${WORKLOAD_HIGH_PRIO_POLL_FREQUENCY:1}
+        poll-size-items: ${WORKLOAD_HIGH_PRIO_POLL_SIZE:10}
   secret:
     persistence: ${SECRET_PERSISTENCE:TESTING_CONFIG_DB_TABLE}
     store:
@@ -118,6 +135,7 @@ airbyte:
         # injects the actual secret value
         credentials: ${SECRET_STORE_GCP_CREDENTIALS:}
         project-id: ${SECRET_STORE_GCP_PROJECT_ID:}
+        region: ${SECRET_STORE_GCP_REGION:}
         # injects the name/key for secret reference
         credentials-ref-name: ${SECRET_STORE_GCP_SECRET_NAME:}
         credentials-ref-key: ${SECRET_STORE_GCP_SECRET_KEY:}
@@ -146,6 +164,7 @@ airbyte:
     write-key: ${SEGMENT_WRITE_KEY:}
   version: ${AIRBYTE_VERSION}
   container.orchestrator:
+    enable-unsafe-code: ${AIRBYTE_ENABLE_UNSAFE_CODE:false}
     java-opts: ${CONTAINER_ORCHESTRATOR_JAVA_OPTS:}
   role: ${AIRBYTE_ROLE:}
   worker:
@@ -184,6 +203,9 @@ airbyte:
           data-plane-creds:
             mount-path: ${CONTAINER_ORCHESTRATOR_DATA_PLANE_CREDS_SECRET_MOUNT_PATH:}
             secret-name: ${CONTAINER_ORCHESTRATOR_DATA_PLANE_CREDS_SECRET_NAME:}
+          gcs-creds:
+            mount-path: ${CONTAINER_ORCHESTRATOR_SECRET_MOUNT_PATH:}
+            secret-name: ${GCS_CREDENTIALS_SECRET_NAME:}
           secret:
             mount-path: ${CONTAINER_ORCHESTRATOR_SECRET_MOUNT_PATH:}
             secret-name: ${CONTAINER_ORCHESTRATOR_SECRET_NAME:}
@@ -238,19 +260,6 @@ airbyte:
       kube:
         use-custom-node-selector: ${USE_CUSTOM_NODE_SELECTOR:false}
         node-selectors: ${JOB_ISOLATED_KUBE_NODE_SELECTORS:}
-  internal-api:
-    auth-header:
-      name: ${AIRBYTE_API_AUTH_HEADER_NAME:}
-      value: ${AIRBYTE_API_AUTH_HEADER_VALUE:}
-    keycloak-auth-client:
-      secret-name: ${KEYCLOAK_AUTH_CLIENT_SECRET_NAME:}
-      secret-key: ${KEYCLOAK_AUTH_CLIENT_SECRET_KEY:}
-    base-path: ${INTERNAL_API_HOST}/api
-    connect-timeout-seconds: ${AIRBYTE_API_CONNECT_TIMEOUT_SECONDS:30}
-    read-timeout-seconds: ${AIRBYTE_API_READ_TIMEOUT_SECONDS:600}
-    retries:
-      delay-seconds: ${AIRBYTE_API_RETRY_DELAY_SECONDS:2}
-      max: ${AIRBYTE_API_MAX_RETRIES:5}
   data.plane.service-account:
     credentials-path: ${DATA_PLANE_SERVICE_ACCOUNT_CREDENTIALS_PATH:}
     email: ${DATA_PLANE_SERVICE_ACCOUNT_EMAIL:}
@@ -320,22 +329,6 @@ endpoints:
     enabled: true
     sensitive: false
 
-temporal:
-  cloud:
-    client:
-      cert: ${TEMPORAL_CLOUD_CLIENT_CERT:}
-      key: ${TEMPORAL_CLOUD_CLIENT_KEY:}
-    enabled: ${TEMPORAL_CLOUD_ENABLED:false}
-    host: ${TEMPORAL_CLOUD_HOST:}
-    namespace: ${TEMPORAL_CLOUD_NAMESPACE:}
-  host: ${TEMPORAL_HOST:`airbyte-temporal:7233`}
-  retention: ${TEMPORAL_HISTORY_RETENTION_IN_DAYS:30}
-  sdk:
-    timeouts:
-      rpc-timeout: ${TEMPORAL_SDK_RPC_TIMEOUT:60s}
-      rpc-long-poll-timeout: ${TEMPORAL_SDK_RPC_LONG_POLL_TIMEOUT:70s}
-      rpc-query-timeout: ${TEMPORAL_SDK_RPC_QUERY_TIMEOUT:10s}
-
 logger:
   levels:
     com.zaxxer.hikari: ERROR
@@ -343,7 +336,6 @@ logger:
     io.grpc: INFO
     io.fabric8.kubernetes.client: INFO
     io.netty: INFO
-    io.temporal: INFO
 #   Uncomment to help resolve issues with conditional beans
 #      io.micronaut.context.condition: DEBUG
 
