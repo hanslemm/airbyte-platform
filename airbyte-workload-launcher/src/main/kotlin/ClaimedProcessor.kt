@@ -9,10 +9,6 @@ import datadog.trace.api.Trace
 import dev.failsafe.Failsafe
 import dev.failsafe.RetryPolicy
 import dev.failsafe.function.CheckedSupplier
-import io.airbyte.api.client.ApiException
-import io.airbyte.metrics.MetricAttribute
-import io.airbyte.metrics.MetricClient
-import io.airbyte.metrics.OssMetricsRegistry
 import io.airbyte.metrics.lib.ApmTraceUtils
 import io.airbyte.metrics.lib.MetricTags
 import io.airbyte.workload.api.client.WorkloadApiClient
@@ -31,6 +27,7 @@ import jakarta.inject.Singleton
 import reactor.core.publisher.Mono
 import reactor.core.scheduler.Schedulers
 import reactor.kotlin.core.publisher.toFlux
+import java.net.ConnectException
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.time.Duration
@@ -87,30 +84,44 @@ class ClaimedProcessor(
       .subscribeOn(scheduler)
   }
 
-  private fun getWorkloadList(req: WorkloadListRequest): WorkloadListResponse {
-    logger.info { "requesting workload list: $req" }
+  private fun addTagsToTrace() {
+    val commonTags = hashMapOf<String, Any>()
+    commonTags[DATA_PLANE_ID_TAG] = dataplaneId
+    ApmTraceUtils.addTagsToTrace(commonTags)
+  }
 
-    return Failsafe
-      .with(
-        RetryPolicy
-          .builder<Any>()
-          .withBackoff(backoffDuration, backoffMaxDelay)
-          .onRetry { ev -> logger.error(ev.lastException) { "Retrying to fetch workloads for dataplane(s): ${req.dataplane}" } }
-          .withMaxAttempts(-1)
-          .abortOn { exception ->
-            when (exception) {
-              // This makes us to retry only on 5XX errors
-              is ApiException -> exception.statusCode !in 500..599
-              // We want to retry on most network errors
-              is SocketException -> false
-              is SocketTimeoutException -> false
-              else -> true
+  private fun getWorkloadList(workloadListRequest: WorkloadListRequest): WorkloadListResponse {
+    while (true) {
+      try {
+        return Failsafe.with(
+          RetryPolicy.builder<Any>()
+            .withBackoff(Duration.ofSeconds(20), Duration.ofDays(365))
+            .onRetry { logger.error { "Retrying to fetch workloads for dataplane $dataplaneId" } }
+            .abortOn { exception ->
+              when (exception) {
+                is ServerException -> exception.statusCode / 100 != 5
+                is SocketException -> false
+                else -> true
+              }
             }
-          }.build(),
-      ).get(
-        CheckedSupplier {
-          workloadApiClient.workloadList(req)
-        },
-      )
+            .build(),
+        ).get<WorkloadListResponse>(
+          CheckedSupplier {
+            apiClient.workloadApi.workloadList(workloadListRequest)
+          },
+        )
+      } catch (e: FailsafeException) {
+        if (e.cause is SocketException) {
+          // Directly handle and propagate the SocketException
+          logger.error { "Operation not permitted: ${e.cause?.message}" }
+          throw e // Surface the SocketException immediately
+        }
+        if (e.cause !is ConnectException && e.cause !is SocketTimeoutException) {
+          throw e // Surface all other errors
+        }
+        // Continue retrying for connection timeouts and connection exceptions
+        logger.warn { "Failed to connect to workload API fetching workloads for dataplane $dataplaneId, retrying..." }
+      }
+    }
   }
 }
