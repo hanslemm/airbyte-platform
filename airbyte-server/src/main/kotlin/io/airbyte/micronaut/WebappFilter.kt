@@ -15,6 +15,7 @@ import io.micronaut.http.annotation.Filter
 import io.micronaut.http.annotation.Filter.MATCH_ALL_PATTERN
 import io.micronaut.http.filter.HttpServerFilter
 import io.micronaut.http.filter.ServerFilterChain
+import io.micronaut.http.simple.SimpleHttpRequest
 import org.reactivestreams.Publisher
 import java.time.Clock
 import java.time.ZoneOffset
@@ -146,13 +147,23 @@ private fun ServerFilterChain.modifyResponse(
  */
 @InternalForTesting
 internal fun HttpRequest<*>.copy(uri: String): HttpRequest<*> =
-  HttpRequest
-    .create<Any>(this.method, uri)
-    .apply {
-      // copy the headers
-      this@copy.headers.forEach { (key, values) -> values.forEach { header(key, it) } }
-      // copy the body
-      this@copy.body.getOrNull()?.let { body(it) }
-    }
+  run {
+    // Resolve the new path against the original request URI so host/scheme/port are preserved
+    val newUriString =
+      try {
+        this.uri.resolve(uri).toString()
+      } catch (_: Exception) {
+        // Fallback to the provided path if resolution fails
+        uri
+      }
+
+    val bodyObj: Any? = this.body.getOrNull()
+    val newReq = SimpleHttpRequest<Any>(this.method, newUriString, bodyObj)
+
+    // Copy headers
+    this.headers.forEach { (key, values) -> values.forEach { newReq.headers.add(key, it) } }
+
+    newReq
+  }
 
 private val lastModifiedFormatter = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
